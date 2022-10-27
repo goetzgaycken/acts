@@ -17,6 +17,9 @@
 #include <numeric>
 #include <stdexcept>
 
+#include <unistd.h>
+#include <iostream>
+
 #include <TFile.h>
 #include <TTree.h>
 #include <TVectorF.h>
@@ -57,6 +60,10 @@ ActsExamples::CKFPerformanceWriter::CKFPerformanceWriter(
   m_fakeRatePlotTool.book(m_fakeRatePlotCache);
   m_duplicationPlotTool.book(m_duplicationPlotCache);
   m_trackSummaryPlotTool.book(m_trackSummaryPlotCache);
+
+  //std::cout << "DEBUG ActsExamples::CKFPerformanceWriter pid " << getpid() << " sleep..."<< std::endl;
+  //  sleep(10);
+  //std::cout << "DEBUG ActsExamples::CKFPerformanceWriter ... continue." << std::endl;
 }
 
 ActsExamples::CKFPerformanceWriter::~CKFPerformanceWriter() {
@@ -122,6 +129,12 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::endRun() {
   return ProcessCode::SUCCESS;
 }
 
+class Counter {
+public:
+   Counter &operator++() { ++m_counter; return *this;}
+   unsigned int counts() const { return m_counter; }
+   unsigned int m_counter=0;
+};
 ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
     const AlgorithmContext& ctx, const TrajectoriesContainer& trajectories) {
   using HitParticlesMap = IndexMultimap<ActsFatras::Barcode>;
@@ -151,6 +164,221 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   // Vector of input features for neural network classification
   std::vector<float> inputFeatures(3);
 
+  std::cout << "particles " << hitParticlesMap.size() << std::endl;
+  std::map<std::pair<size_t, size_t>, unsigned int >              trajectoryId;
+  std::map<unsigned int, std::pair<size_t, size_t> >              trajectoryIdMap;
+  std::map<ActsFatras::Barcode, unsigned int >                    shortParticleId;
+  std::map<Index, std::set< unsigned int > >                      hitTrajectoryMap;
+  std::map<unsigned int, std::map<ActsFatras::Barcode, Counter> > trajectoryBarcodeMap;
+  // Loop over all trajectories
+  for (auto [itraj, trackTip] : trackTips) {
+    const auto& traj = trajectories[itraj];
+    const auto& mj = traj.multiTrajectory();
+    auto trajState =
+       Acts::MultiTrajectoryHelpers::trajectoryState(mj, trackTip);
+    
+    if (traj.hasTrajectory(trackTip)) {
+       
+       std::pair<std::map<std::pair<size_t, size_t>, unsigned int >::iterator, bool>
+          ret = trajectoryId.insert( std::make_pair( std::make_pair(itraj,trackTip), trajectoryId.size() ));
+       if (ret.second) {
+          trajectoryIdMap.insert( std::make_pair( ret.first->second, ret.first->first) );
+       }
+       unsigned int traj_id=ret.first->second;
+       traj.multiTrajectory().visitBackwards(trackTip, [&](const auto& state) {
+          // no truth info with non-measurement state
+          if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
+             return true;
+          }
+
+          // register all particles that generated this hit
+          const auto& sl = static_cast<const IndexSourceLink&>(state.uncalibrated());
+          auto hitIndex = sl.index();
+          hitTrajectoryMap[hitIndex].insert(traj_id);
+          for (auto hitParticle : makeRange(hitParticlesMap.equal_range(hitIndex))) {
+             /*std::pair<std::map<ActsFatras::Barcode, unsigned int >::const_iterator, bool >
+               particle_insert =*/ shortParticleId.insert( std::make_pair(hitParticle.second, shortParticleId.size()));
+             ++(trajectoryBarcodeMap[ traj_id ][hitParticle.second]);
+          }
+          return true;
+       });
+    }
+  }
+  
+  for (auto [itraj, trackTip] : trackTips) {
+    const auto& traj = trajectories[itraj];
+    const auto& mj = traj.multiTrajectory();
+    auto trajState =
+       Acts::MultiTrajectoryHelpers::trajectoryState(mj, trackTip);
+    
+    if (traj.hasTrajectory(trackTip)) {
+       unsigned int missing_hit=0;
+       std::map<ActsFatras::Barcode, Counter> particle_counts;
+       std::map<unsigned int,Counter> trajectory_counts;
+
+       std::map<std::pair<size_t, size_t>, unsigned int >::iterator
+          id_iter = trajectoryId.find( std::make_pair(itraj,trackTip) );
+       unsigned int traj_id=(id_iter != trajectoryId.end() ? id_iter->second : std::numeric_limits<unsigned int>::max());
+
+       traj.multiTrajectory().visitBackwards(trackTip, [&](const auto& state) {
+          // no truth info with non-measurement state
+          if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
+             return true;
+          }
+
+          // register all particles that generated this hit
+          const auto& sl = static_cast<const IndexSourceLink&>(state.uncalibrated());
+          auto hitIndex = sl.index();
+          std::map<Index, std::set< unsigned int > >::const_iterator
+             hit_iter = hitTrajectoryMap.find(hitIndex);
+          if (hit_iter != hitTrajectoryMap.end()) {
+             
+             for(unsigned int a_traj_id : hit_iter->second) {
+                ++(trajectory_counts[a_traj_id]);
+             }
+          }
+          else {
+             ++missing_hit;
+          }
+          for (auto hitParticle : makeRange(hitParticlesMap.equal_range(hitIndex))) {
+             ++(particle_counts[hitParticle.second]);
+          }
+          return true;
+       });
+
+       if (particle_counts.size()>1 || trajectory_counts.size()>1) {
+          
+          std::cout << "trajectory " << std::setw(9) << itraj << " tip: " << std::setw(9) << trackTip
+                    << " id " << traj_id
+                    << std::endl;
+          std::cout << "----------------------------- " << std::endl;
+          std::cout << std::setw(9) << " " << " ";
+          for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
+             // std::map<ActsFatras::Barcode, unsigned int >::const_iterator
+             //    particle_iter = shortParticleId.find( a_particle.first );
+             // if (particle_iter != shortParticleId.end()) {
+             //    std::cout << std::setw(12) << particle_iter->second;
+             // }
+             // else {
+                std::stringstream msg;
+                msg << a_particle.first;
+                std::cout << std::setw(12) << msg.str();
+                //             }
+          }
+          std::cout << " | ";
+          for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
+             std::cout << std::setw(4) << a_trajectory.first;
+          }
+          std::cout << std::endl;
+          std::cout << std::setw(9) << " " << " ";
+          for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
+             std::map<ActsFatras::Barcode, unsigned int >::const_iterator
+                particle_iter = shortParticleId.find( a_particle.first );
+             if (particle_iter != shortParticleId.end()) {
+                 std::cout << std::setw(12) << particle_iter->second;
+             }
+             else {
+                std::cout << std::setw(12) << " ";
+             }
+          }
+          std::cout << " | ";
+          for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
+             std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator
+                iter = trajectoryIdMap.find(a_trajectory.first);
+             if (iter != trajectoryIdMap.end()) {
+                std::cout << std::setw(4) << iter->second.first;
+             }
+             else {
+                std::cout << std::setw(4) << " ";
+             }
+          }
+          std::cout << std::endl;
+          std::cout << std::setw(9) << " " << " ";
+          for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
+             (void) a_particle; // avoid unused variable warning
+             std::cout << std::setw(12) << " ";
+          }
+          std::cout << " | ";
+          for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
+             std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator
+                iter = trajectoryIdMap.find(a_trajectory.first);
+             if (iter != trajectoryIdMap.end()) {
+                std::cout << std::setw(4) << iter->second.second;
+             }
+             else {
+                std::cout << std::setw(4) << " ";
+             }
+          }
+          std::cout << std::endl;
+          
+          std::cout << std::setw(9) << " ";
+          for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
+             std::cout << std::setw(12) << a_particle.second.counts();
+          }
+          std::cout << " | ";
+          for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
+             std::cout << std::setw(4) << a_trajectory.second.counts();
+          }
+          std::cout << std::endl << std::endl;
+          traj.multiTrajectory().visitBackwards(trackTip, [&](const auto& state) {
+             // no truth info with non-measurement state
+             if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
+                return true;
+             }
+             // register all particles that generated this hit
+             const auto& sl = static_cast<const IndexSourceLink&>(state.uncalibrated());
+             auto hitIndex = sl.index();
+             std::cout << std::setw(9) << hitIndex;
+             
+             for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
+                bool has=false;
+                for (auto hitParticle : makeRange(hitParticlesMap.equal_range(hitIndex))) {
+                   if (hitParticle.second == a_particle.first) {
+                      has=true;
+                      break;
+                   }
+                }
+                if (has) {
+                   std::map<ActsFatras::Barcode, unsigned int >::const_iterator
+                      particle_iter = shortParticleId.find( a_particle.first );
+                   if (particle_iter != shortParticleId.end()) {
+                      std::cout << std::setw(12) << particle_iter->second;
+                   }
+                   else {
+                      std::stringstream msg;
+                      msg << a_particle.first;
+                      std::cout << std::setw(12) << msg.str();
+                   }
+                 }
+                else {
+                   std::cout << std::setw(12) << " ";
+                }
+             }
+             
+             std::cout << " | ";
+             
+             std::map<Index, std::set< unsigned int > >::const_iterator
+                hit_iter = hitTrajectoryMap.find(hitIndex);
+             if (hit_iter != hitTrajectoryMap.end()) {
+                for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
+                   bool has=hit_iter->second.find(a_trajectory.first) != hit_iter->second.end();
+                   if (has) {
+                      std::cout << std::setw(4) << a_trajectory.first;
+                   }
+                   else {
+                      std::cout << std::setw(4) << " ";
+                   }
+                }
+             }
+             std::cout << std::endl;
+ 
+             return true;
+          });
+       }
+    }
+  }
+
+  
   // Loop over all trajectories
   for (auto [itraj, trackTip] : trackTips) {
     const auto& traj = trajectories[itraj];
