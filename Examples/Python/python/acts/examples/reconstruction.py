@@ -1058,6 +1058,14 @@ def addVertexFitting(
         AdaptiveMultiVertexFinderAlgorithm,
         RootVertexPerformanceWriter,
     )
+    print ('DEBUG args',type(field),field)
+    print ('DEBUG args',type(outputDirRoot),outputDirRoot)
+    print ('DEBUG args',type(associatedParticles),associatedParticles)
+    print ('DEBUG args',type(trajectories),trajectories)
+    print ('DEBUG args',type(trackParameters),trackParameters)
+    print ('DEBUG args',type(trackParametersTips),trackParametersTips)
+    print ('DEBUG args',type(vertexFinder),vertexFinder)
+    print ('DEBUG args',type(logLevel),logLevel)
 
     trajectories = trajectories if trajectories is not None else ""
     trackParameters = trackParameters if trackParameters is not None else ""
@@ -1128,6 +1136,7 @@ def addVertexFitting(
     else:
         raise RuntimeError("Invalid finder argument")
 
+    print('DEBUG output dir',outputDirRoot)
     if outputDirRoot is not None:
         outputDirRoot = Path(outputDirRoot)
         if not outputDirRoot.exists():
