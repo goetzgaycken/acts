@@ -1,3 +1,4 @@
+add_definitions(-g -O0)
 add_library(
   ActsExamplesIoPerformance SHARED
   ActsExamples/Io/Performance/TrackFinderPerformanceWriter.cpp
