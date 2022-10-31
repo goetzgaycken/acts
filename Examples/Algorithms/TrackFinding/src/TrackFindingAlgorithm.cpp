@@ -68,6 +68,8 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
   // Prepare the output data with TrackParameters
   TrackParametersContainer trackParametersContainer;
   std::vector<std::pair<size_t, size_t>> trackParametersTips;
+  std::vector<size_t> seedIdx;
+  seedIdx.reserve( initialParameters.size() );
 
   // Construct a perigee surface as the target surface
   auto pSurface = Acts::Surface::makeShared<Acts::PerigeeSurface>(
@@ -129,6 +131,7 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
       trajectories.emplace_back(trackFindingOutput.fittedStates,
                                 trackFindingOutput.lastMeasurementIndices,
                                 trackFindingOutput.fittedParameters);
+      seedIdx.push_back(iseed);
 
       const auto& traj = trajectories.back();
       for (const auto tip : traj.tips()) {
@@ -144,6 +147,7 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
       // Track finding failed. Add an empty result so the output container has
       // the same number of entries as the input.
       trajectories.push_back(Trajectories());
+      seedIdx.push_back(iseed);
     }
   }
 
@@ -157,6 +161,8 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
                      std::move(trackParametersContainer));
   ctx.eventStore.add(m_cfg.outputTrackParametersTips,
                      std::move(trackParametersTips));
+  ctx.eventStore.add("TrackSeedIdx",
+                     std::move(seedIdx));
   return ActsExamples::ProcessCode::SUCCESS;
 }
 
