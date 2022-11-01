@@ -151,6 +151,8 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
       ctx.eventStore.get<HitParticlesMap>(m_cfg.inputMeasurementParticlesMap);
   const auto& seedIdx =
      ctx.eventStore.get<std::vector<std::size_t> >("TrackSeedIdx");
+  const auto& protoTracks =
+      ctx.eventStore.get<ProtoTrackContainer>("extended_proto_tracks");
 
   // Counter of truth-matched reco tracks
   std::map<ActsFatras::Barcode, std::vector<RecoTrackInfo>> matched;
@@ -298,6 +300,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                 iter = trajectoryIdMap.find(a_trajectory.first);
              if (iter != trajectoryIdMap.end()) {
                 std::cout << std::setw(4) << iter->second.first;
+                
              }
              else {
                 std::cout << std::setw(4) << " ";
@@ -376,10 +379,23 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                 for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
                    bool has=hit_iter->second.find(a_trajectory.first) != hit_iter->second.end();
                    if (has) {
-                      std::cout << std::setw(4) << a_trajectory.first;
+                      bool is_seed=false;
+                      std::map< unsigned int, unsigned int>::const_iterator
+                         iter = trajToSeed.find(a_trajectory.first);
+                      if (iter != trajToSeed.end()) {
+                         if (iter->second < protoTracks.size()) {
+                            for (const auto &idx : protoTracks[iter->second]) {
+                               if (idx ==  hitIndex) {
+                                  is_seed=true;
+                                  break;
+                               }
+                            }
+                         }
+                      }
+                      std::cout << std::setw(4) << a_trajectory.first << (is_seed ? "*" : " ");
                    }
                    else {
-                      std::cout << std::setw(4) << " ";
+                      std::cout << std::setw(4) << " " << " ";
                    }
                 }
              }
@@ -389,24 +405,52 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           });
           
           // -- seed 
+          std::vector<std::vector<Index> > seed_cluster_idx;
           for (unsigned int offset_i=0;offset_i<trajectory_counts.size();) {
              unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_counts.size()), offset_i+10);
-             std::cout << std::setw(4) << " " << "  ";
-             unsigned int counter_i=0;
-             for (const std::pair<const unsigned int,Counter> trajectory : trajectory_counts) {
-                if (counter_i++>=offset_i) {
-                   
-                   std::map< unsigned int, unsigned int>::const_iterator
-                      iter = trajToSeed.find(trajectory.first);
-                   std::cout << std::setw(14);
-                   if (iter != trajToSeed.end()) {
-                      std::cout << iter->second;
+             seed_cluster_idx.clear();
+             seed_cluster_idx.reserve(10);
+             bool have_idx=true;
+             for (unsigned pass_i=0; have_idx; ++pass_i) {
+                unsigned int counter_i=0;
+                unsigned int elm_i=0;
+                have_idx=(pass_i==0);
+                std::cout << std::setw(4) << " " << "  ";
+                for (const std::pair<const unsigned int,Counter> trajectory : trajectory_counts) {
+                   if (counter_i++>=offset_i) {
+                      if (pass_i==0) {
+                         seed_cluster_idx.emplace_back();
+                         std::map< unsigned int, unsigned int>::const_iterator
+                            iter = trajToSeed.find(trajectory.first);
+                         std::cout << std::setw(14);
+                         if (iter != trajToSeed.end()) {
+                            std::cout << iter->second;
+                            if (iter->second < protoTracks.size()) {
+                               for (const auto &idx : protoTracks[iter->second]) {
+                                  seed_cluster_idx.back().push_back(idx);
+                               }
+                            }
+                         }
+                         else {
+                            std::cout << " ";
+                         }
+                         if (counter_i>=traj_end) { break; }
+                      }
+                      else {
+                         std::cout << std::setw(14);
+                         if (pass_i <= seed_cluster_idx.at(elm_i).size()) {
+                            std::cout << seed_cluster_idx[elm_i][pass_i-1];
+                            have_idx=true;
+                         }
+                         else {
+                            std::cout << " ";
+                         }
+                         if (counter_i>=traj_end) { break; }
+                      }
+                      ++elm_i;
                    }
-                   else {
-                      std::cout << " ";
-                   }
-                   if (counter_i>=traj_end) { break; }
                 }
+                std::cout << std::endl;
              }
              offset_i = traj_end;
              std::cout << std::endl;
