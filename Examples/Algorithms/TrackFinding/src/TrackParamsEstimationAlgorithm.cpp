@@ -177,6 +177,8 @@ ActsExamples::ProcessCode ActsExamples::TrackParamsEstimationAlgorithm::execute(
   ProtoTrackContainer tracks;
   trackParameters.reserve(seeds.size());
   tracks.reserve(seeds.size());
+  ProtoTrackContainer ext_tracks;
+  ext_tracks.reserve(seeds.size());
 
   auto bCache = m_cfg.magneticField->makeCache(ctx.magFieldContext);
 
@@ -223,6 +225,7 @@ ActsExamples::ProcessCode ActsExamples::TrackParamsEstimationAlgorithm::execute(
       // Create a proto track for this seed
       ProtoTrack track;
       track.reserve(3);
+      ProtoTrack ext_track;
       for (const auto& sp : seed.sp()) {
         if (sp->sourceLinks().empty()) {
           ACTS_WARNING("Missing source link in the space point")
@@ -231,8 +234,14 @@ ActsExamples::ProcessCode ActsExamples::TrackParamsEstimationAlgorithm::execute(
         const auto slink =
             static_cast<const IndexSourceLink&>(*(sp->sourceLinks()[0]));
         track.push_back(slink.index());
+        for (const auto a_link_ptr : sp->sourceLinks() ) {
+           if (a_link_ptr) {
+              ext_track.push_back(static_cast<const IndexSourceLink *>(a_link_ptr)->index() );
+           }
+        }
       }
       tracks.emplace_back(track);
+      ext_tracks.emplace_back(ext_track);
     }
   }
   ACTS_VERBOSE("Estimated " << trackParameters.size()
@@ -241,5 +250,6 @@ ActsExamples::ProcessCode ActsExamples::TrackParamsEstimationAlgorithm::execute(
 
   ctx.eventStore.add(m_cfg.outputTrackParameters, std::move(trackParameters));
   ctx.eventStore.add(m_cfg.outputProtoTracks, std::move(tracks));
+  ctx.eventStore.add("extended_proto_tracks", std::move(ext_tracks));
   return ActsExamples::ProcessCode::SUCCESS;
 }
