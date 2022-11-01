@@ -213,6 +213,7 @@ def run_ckf_tracking(truthSmearedSeeded, truthEstimatedSeeded, label):
                 s,
                 AmbiguityResolutionConfig(maximumSharedHits=3),
                 CKFPerformanceConfig(ptMin=400.0 * u.MeV, nMeasurementsMin=6),
+                trackingGeometry,
                 outputDirRoot=tp,
             )
 
@@ -325,6 +326,7 @@ def run_vertexing(fitter, mu, events):
             s,
             AmbiguityResolutionConfig(maximumSharedHits=3),
             CKFPerformanceConfig(ptMin=400.0 * u.MeV, nMeasurementsMin=6),
+            trackingGeometry,
         )
 
         addVertexFitting(
