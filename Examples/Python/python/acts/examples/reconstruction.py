@@ -793,6 +793,7 @@ def addCKFTracks(
             inputTrajectories=trackFinder.config.outputTrajectories,
             inputTrackParametersTips=trackFinder.config.outputTrackParametersTips,
             inputMeasurementParticlesMap="measurement_particles_map",
+            trackingGeometry=trackingGeometry,
             **acts.examples.defaultKWArgs(
                 # The bottom seed could be the first, second or third hits on the truth track
                 nMeasurementsMin=CKFPerformanceConfigArg.nMeasurementsMin,

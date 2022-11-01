@@ -20,6 +20,10 @@
 #include "Acts/Surfaces/Surface.hpp"
 #include "Acts/Utilities/UnitVectors.hpp"
 
+#include "Acts/Utilities/Helpers.hpp"
+#include <Acts/Geometry/TrackingGeometry.hpp>
+#include "ActsExamples/EventData/Measurement.hpp"
+
 #include <numeric>
 #include <stdexcept>
 
@@ -141,6 +145,35 @@ public:
    unsigned int counts() const { return m_counter; }
    unsigned int m_counter=0;
 };
+
+namespace {
+   template <class T>
+   double transverseMomentum(const T &param) {
+      return param[Acts::eBoundQOverP] != 0. ? std::sin(param[Acts::eBoundTheta]) / std::abs(param[Acts::eBoundQOverP]) : 0.;
+   }
+
+   Acts::Vector3 globalCoords(const Acts::TrackingGeometry &tracking_geometetry,
+                              const Acts::GeometryContext& gctx,
+                              const ActsExamples::Measurement& meas) {
+      const auto& slink =
+         std::visit([](const auto& x) { return &x.sourceLink(); }, meas);
+
+      const auto geoId = slink->geometryId();
+
+      const Acts::Surface* surface = tracking_geometetry.findSurface(geoId);
+      Acts::Vector2 localPos = std::visit(
+                                             [](const auto& measurement) {
+                                                auto expander = measurement.expander();
+                                                Acts::BoundVector par = expander * measurement.parameters();
+                                                Acts::Vector2 lpar(par[Acts::eBoundLoc0], par[Acts::eBoundLoc1]);
+                                                return lpar;
+                                             },
+                                             meas);
+      Acts::Vector3 globalPos = surface->localToGlobal(gctx, localPos, Acts::Vector3());
+      return globalPos;
+   }
+}
+
 ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
     const AlgorithmContext& ctx, const TrajectoriesContainer& trajectories) {
   using HitParticlesMap = IndexMultimap<ActsFatras::Barcode>;
@@ -160,6 +193,9 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
      ctx.eventStore.get<std::vector<std::size_t> >("TrackSeedIdx");
   const auto& protoTracks =
       ctx.eventStore.get<ProtoTrackContainer>("extended_proto_tracks");
+  const auto& measurements =
+     ctx.eventStore.get<ActsExamples::MeasurementContainer>("measurements");
+
 
   // Counter of truth-matched reco tracks
   std::map<ActsFatras::Barcode, std::vector<RecoTrackInfo>> matched;
@@ -185,7 +221,8 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                                   const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy> > hitToTrackState;
   std::map<unsigned int, unsigned int> trajToSeed;
   std::vector<unsigned int> processed;
-
+  std::vector<double>       hit_r;
+  unsigned int max_hit_index=0;
   // Loop over all trajectories
   for (auto [itraj, trackTip] : trackTips) {
     const auto& traj = trajectories[itraj];
@@ -196,9 +233,8 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
     if (itraj>=seedIdx.size()) {
        std::cout << "WARNING " << __FUNCTION__ << " index mismatch " << itraj << " !< " << seedIdx.size() << std::endl;
     }
-    
+
     if (traj.hasTrajectory(trackTip)) {
-       
        std::pair<std::map<std::pair<size_t, size_t>, unsigned int >::iterator, bool>
           ret = trajectoryId.insert( std::make_pair( std::make_pair(itraj,trackTip), trajectoryId.size() ));
        if (ret.second) {
@@ -215,6 +251,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           // register all particles that generated this hit
           const auto& sl = static_cast<const IndexSourceLink&>(state.uncalibrated());
           auto hitIndex = sl.index();
+          max_hit_index=std::max(max_hit_index,hitIndex);
           hitToTrackState[hitIndex].insert( std::make_pair(traj_id, state) );
           hitTrajectoryMap[hitIndex].insert(traj_id);
           trajectoryToHits[traj_id].push_back(hitIndex);
@@ -228,13 +265,14 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
     }
   }
   processed.reserve(trajectoryIdMap.size());
-  
+  hit_r.resize( max_hit_index+1, 0.);
+
   for (auto [itraj, trackTip] : trackTips) {
     const auto& traj = trajectories[itraj];
     const auto& mj = traj.multiTrajectory();
     auto trajState =
        Acts::MultiTrajectoryHelpers::trajectoryState(mj, trackTip);
-    
+
     if (traj.hasTrajectory(trackTip)) {
        unsigned int missing_hit=0;
        std::map<ActsFatras::Barcode, Counter> particle_counts;
@@ -254,6 +292,10 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
        }
        const std::vector<Index> &hits = trajectoryToHits.at(traj_id);
        std::vector<Index> all_hits(hits);
+       for (Index hitIndex: all_hits) {
+          Acts::Vector3 pos( globalCoords(*(m_cfg.trackingGeometry), ctx.geoContext,measurements.at(hitIndex)) );
+          hit_r.at(hitIndex) = Acts::VectorHelpers::perp(pos);
+       }
        std::sort(all_hits.begin(),all_hits.end());
        for (const Index &hitIndex : hits) {
           std::map<Index, std::set< unsigned int > >::const_iterator
@@ -269,19 +311,22 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                    std::vector<Index>::iterator new_hit_iter = std::lower_bound(all_hits.begin(),all_hits.end(),sibling_hit);
                    if (new_hit_iter == all_hits.end() || *new_hit_iter != sibling_hit) {
                       all_hits.insert( new_hit_iter, sibling_hit);
+                      Acts::Vector3 pos( globalCoords(*(m_cfg.trackingGeometry), ctx.geoContext,measurements.at(sibling_hit)) );
+                      hit_r.at(sibling_hit) = Acts::VectorHelpers::perp(pos);
                    }
                 }
              }
           }
        }
-       
+       std::sort(all_hits.begin(),all_hits.end(),
+                 [&hit_r](Index hit_idx_a, Index hit_idx_b) {
+                    return hit_r[hit_idx_a] < hit_r[hit_idx_b]; });
 
        for (const Index &hitIndex : all_hits ) {
 
           std::map<Index, std::set< unsigned int > >::const_iterator
              hit_iter = hitTrajectoryMap.find(hitIndex);
           if (hit_iter != hitTrajectoryMap.end()) {
-             
              for(unsigned int a_traj_id : hit_iter->second) {
                 ++(trajectory_counts[a_traj_id]);
              }
@@ -295,12 +340,15 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
        }
 
        if (particle_counts.size()>1 || trajectory_counts.size()>1) {
-          
           std::cout << "trajectory " << std::setw(9) << itraj << " tip: " << std::setw(9) << trackTip
                     << " id " << traj_id
                     << std::endl;
           std::cout << "----------------------------- " << std::endl;
-          std::cout << std::setw(9) << " " << " ";
+          std::cout << std::setw(9) << " " << " "
+                    << std::setw(14) << " "
+                    << std::setw(14) << " "
+                    << std::setw(14) << " " << " ";
+
           for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
              // std::map<ActsFatras::Barcode, unsigned int >::const_iterator
              //    particle_iter = shortParticleId.find( a_particle.first );
@@ -318,7 +366,11 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
              std::cout << std::setw(6) << a_trajectory.first;
           }
           std::cout << std::endl;
-          std::cout << std::setw(9) << " " << " ";
+          std::cout << std::setw(9) << " " << " "
+                    << std::setw(14) << " "
+                    << std::setw(14) << " "
+                    << std::setw(14) << " " << " ";
+
           for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
              std::map<ActsFatras::Barcode, unsigned int >::const_iterator
                 particle_iter = shortParticleId.find( a_particle.first );
@@ -334,15 +386,18 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
              std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator
                 iter = trajectoryIdMap.find(a_trajectory.first);
              if (iter != trajectoryIdMap.end()) {
-                std::cout << std::setw(4) << iter->second.first;
-                
+                std::cout << std::setw(6) << iter->second.first;
              }
              else {
-                std::cout << std::setw(4) << " ";
+                std::cout << std::setw(6) << " ";
              }
           }
           std::cout << std::endl;
-          std::cout << std::setw(9) << " " << " ";
+          std::cout << std::setw(9) << " " << " "
+                    << std::setw(14) << " "
+                    << std::setw(14) << " "
+                    << std::setw(14) << " " << " ";
+
           for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
              (void) a_particle; // avoid unused variable warning
              std::cout << std::setw(16) << " ";
@@ -352,28 +407,36 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
              std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator
                 iter = trajectoryIdMap.find(a_trajectory.first);
              if (iter != trajectoryIdMap.end()) {
-                std::cout << std::setw(4) << iter->second.second;
+                std::cout << std::setw(6) << iter->second.second;
              }
              else {
-                std::cout << std::setw(4) << " ";
+                std::cout << std::setw(6) << " ";
              }
           }
           std::cout << std::endl;
-          
-          std::cout << std::setw(9) << " " << " ";
+
+          std::cout << std::setw(9) << " " << " "
+                    << std::setw(14) << " "
+                    << std::setw(14) << " "
+                    << std::setw(14) << " " << " " ;
           for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
              std::cout << std::setw(16) << a_particle.second.counts();
           }
           std::cout << " | ";
           for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
-             std::cout << std::setw(4) << a_trajectory.second.counts();
+             std::cout << std::setw(6) << a_trajectory.second.counts();
           }
           std::cout << std::endl << std::endl;
 
           // -- particles and trajectories
           for (const Index &hitIndex : all_hits ) {
              std::cout << std::setw(9) << hitIndex << " ";
-             
+             Acts::Vector3 position( globalCoords(*(m_cfg.trackingGeometry), ctx.geoContext,measurements.at(hitIndex)) );
+             std::cout << std::setw(14) << Acts::VectorHelpers::perp(position)
+                       << std::setw(14) << position[2]
+                       << std::setw(14) << Acts::VectorHelpers::phi(position)
+                       << " ";
+
              for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
                 bool has=false;
                 for (auto hitParticle : makeRange(hitParticlesMap.equal_range(hitIndex))) {
@@ -398,9 +461,9 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                    std::cout << std::setw(16) << " ";
                 }
              }
-             
+
              std::cout << " | ";
-             
+
              std::map<Index, std::set< unsigned int > >::const_iterator
                 hit_iter = hitTrajectoryMap.find(hitIndex);
              if (hit_iter != hitTrajectoryMap.end()) {
@@ -420,18 +483,18 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                             }
                          }
                       }
-                      std::cout << std::setw(4) << a_trajectory.first << (is_seed ? "*" : " ");
+                      std::cout << std::setw(5) << a_trajectory.first << (is_seed ? "*" : " ");
                    }
                    else {
-                      std::cout << std::setw(4) << " " << " ";
+                      std::cout << std::setw(5) << " " << " ";
                    }
                 }
              }
              std::cout << std::endl;
- 
+
           }
-          
-          // -- seed 
+
+          // -- seed
           std::vector<std::vector<Index> > seed_cluster_idx;
           for (unsigned int offset_i=0;offset_i<trajectory_counts.size();) {
              unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_counts.size()), offset_i+10);
@@ -488,7 +551,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           for( const std::pair<const unsigned int, std::map<unsigned int,
                                                            const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy> >
                   &hit_states : hitToTrackState ) {
-             std::vector<std::array<double,6> > trajectory_params;
+             std::vector<std::array<double,7> > trajectory_params;
              trajectory_params.reserve( trajectory_counts.size() );
              bool has_param=false;
              for (const std::pair<const unsigned int,Counter> trajectory : trajectory_counts) {
@@ -501,30 +564,34 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
 
                    Acts::Vector2 local(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1]);
                    Acts::Vector3 position(traj_iter->second.referenceSurface().localToGlobal(ctx.geoContext, local, direction));
-                   trajectory_params.emplace_back(std::array<double,6>{ position[Acts::ePos0],
-                         position[Acts::ePos1],
-                         position[Acts::ePos2],
-                         boundParams[Acts::eBoundPhi],
-                         boundParams[Acts::eBoundTheta],
-                         boundParams[Acts::eBoundQOverP]});
+                   trajectory_params.emplace_back(std::array<double,7>{ Acts::VectorHelpers::phi(position),
+                                                                        Acts::VectorHelpers::theta(position),
+                                                                        Acts::VectorHelpers::perp(position),
+                                                                        position[Acts::ePos2],
+                                                                        boundParams[Acts::eBoundPhi],
+                                                                        boundParams[Acts::eBoundTheta],
+                                                                        std::copysign ( transverseMomentum(boundParams), boundParams[Acts::eBoundQOverP])
+                      });
                    has_param=true;
                 }
                 else {
-                   trajectory_params.emplace_back(std::array<double,6>{0.,0.,0.,0.,0.,0.});
+                   trajectory_params.emplace_back(std::array<double,7>{});
                 }
              }
              if (has_param) {
+                static std::array<std::string,7> param_names{"phi","theta","r","z","phi","theta","(+-)pt"};
                 for (unsigned int offset_i=0;offset_i<trajectory_params.size();) {
                    unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_params.size()), offset_i+10);
-                   for (unsigned int param_i=0; param_i<6; ++param_i) {
+                   for (unsigned int param_i=0; param_i<7; ++param_i) {
                       if (param_i==0 && offset_i==0) {
                          std::cout << std::setw(4) << hit_states.first << ") ";
                       }
                       else {
                          std::cout << std::setw(4) << " " << "  ";
                       }
+                      std::cout << std::setw(7) << param_names.at(param_i) << " ";
                       for (unsigned int traj_i=offset_i; traj_i<traj_end;++traj_i) {
-                         const std::array<double, 6> &param = trajectory_params[traj_i];
+                         const std::array<double, 7> &param = trajectory_params[traj_i];
                          if (std::abs(param[5])>0) {
                             std::cout << std::setw(14) << param[param_i];
                          }

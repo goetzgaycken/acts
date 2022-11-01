@@ -296,6 +296,7 @@ void addOutput(Context& ctx) {
       inputMeasurementParticlesMap, filePath, fileMode, effPlotToolConfig,
       fakeRatePlotToolConfig, duplicationPlotToolConfig,
       trackSummaryPlotToolConfig, truthMatchProbMin, nMeasurementsMin, ptMin,
+      trackingGeometry,
       duplicatedPredictor);
 
   ACTS_PYTHON_DECLARE_WRITER(
