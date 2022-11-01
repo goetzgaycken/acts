@@ -15,7 +15,7 @@
 #include "ActsExamples/Validation/EffPlotTool.hpp"
 #include "ActsExamples/Validation/FakeRatePlotTool.hpp"
 #include "ActsExamples/Validation/TrackSummaryPlotTool.hpp"
-
+#include "Acts/Geometry/TrackingGeometry.hpp"
 #include <mutex>
 
 class TFile;
@@ -57,6 +57,10 @@ class CKFPerformanceWriter final : public WriterT<TrajectoriesContainer> {
     double ptMin = 1 * Acts::UnitConstants::GeV;
     /// function to check if neural network predicted track label is duplicate
     std::function<bool(std::vector<float>&)> duplicatedPredictor = nullptr;
+
+    std::shared_ptr<const Acts::TrackingGeometry> trackingGeometry;
+     ///< The tracking geometry, a set pointer will cause the
+     ///< geometry to be drawn
   };
 
   /// Construct from configuration and log level.
@@ -89,6 +93,7 @@ class CKFPerformanceWriter final : public WriterT<TrajectoriesContainer> {
   /// Plot tool for track hit info
   TrackSummaryPlotTool m_trackSummaryPlotTool;
   TrackSummaryPlotTool::TrackSummaryPlotCache m_trackSummaryPlotCache;
+
 
   // Adding numbers for efficiency, fake, duplicate calculations
   size_t m_nTotalTracks = 0;
