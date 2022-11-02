@@ -21,8 +21,9 @@
 #include "Acts/Utilities/UnitVectors.hpp"
 
 #include "Acts/Utilities/Helpers.hpp"
-#include <Acts/Geometry/TrackingGeometry.hpp>
+#include "Acts/Geometry/TrackingGeometry.hpp"
 #include "ActsExamples/EventData/Measurement.hpp"
+#include "Acts/Definitions/Units.hpp"
 
 #include <numeric>
 #include <stdexcept>
@@ -33,6 +34,8 @@
 #include <TFile.h>
 #include <TTree.h>
 #include <TVectorF.h>
+
+
 
 ActsExamples::CKFPerformanceWriter::CKFPerformanceWriter(
     ActsExamples::CKFPerformanceWriter::Config cfg, Acts::Logging::Level lvl)
@@ -147,6 +150,101 @@ public:
 };
 
 namespace {
+   class Stat {
+   public:
+      Stat() = default;
+      Stat(Stat &&) = default;
+      Stat(const Stat &) = default;
+      Stat(unsigned int nbins, double lower_edge, double upper_edge) {
+         setBinning(nbins, lower_edge, upper_edge);
+      }
+      void add(double val) {
+         m_n += 1.;
+         m_sum += val;
+         m_sum2 += val*val;
+         m_min=std::min(val,m_min);
+         m_max=std::max(val,m_max);
+         if (!m_bins.empty()) {fill(val); }
+      }
+      double mean() const { return m_n>0. ? m_sum/m_n : 0.; }
+      double rms()  const { return m_n>1. ? sqrt( (m_sum2 - m_sum*m_sum/m_n)/(m_n-1.)) : 0.; }
+      double n()    const { return m_n; }
+      double min()  const { return m_min; }
+      double max()  const { return m_max; }
+      double m_n   = 0.;
+      double m_sum = 0.;
+      double m_sum2 = 0.;
+      double m_min = std::numeric_limits<double>::max();
+      double m_max = -std::numeric_limits<double>::max();
+
+      void setBinning(unsigned int n_bins, double lower_edge, double upper_edge) {
+         m_bins.clear();
+         m_bins.resize(n_bins+2,0);
+         m_lowerEdge=lower_edge;
+         m_scale = n_bins / (upper_edge - lower_edge);
+      }
+      unsigned int bin( double value) {
+         return value < m_lowerEdge ? 0 : std::min(m_bins.size()-1,
+                                                   static_cast<std::size_t>( (value - m_lowerEdge) * m_scale));
+      }
+      double lowerEdge() const { return m_lowerEdge; }
+      double upperEdge() const { return m_lowerEdge + (m_bins.size()-2)/m_scale; }
+      double binWidth()  const { return 1/m_scale; }
+      const std::vector<unsigned short> &bins() const { return m_bins; }
+      void fill(double value) {
+         ++m_bins.at(bin(value));
+      }
+      double m_lowerEdge;
+      double m_scale;
+      std::vector<unsigned short> m_bins;
+   };
+   std::ostream &operator<<(std::ostream &out, const Stat &a ) {
+      out <<           std::setw(14) << a.min() << " < "
+          <<           std::setw(14) << a.mean()
+          << " +- " << std::setw(14) << a.rms()
+          << " < "  << std::setw(14) << a.max()
+          << " / "  << std::setw(9)  << a.n();
+      if (!a.bins().empty()) {
+         out << std::endl;
+         out << a.lowerEdge() << ", " << a.lowerEdge()+a.binWidth() << ".." << a.upperEdge() << ": ";
+         out << std::setw(5) << a.bins()[0] << " |";
+         for (unsigned int bin_i=1; bin_i<a.bins().size()-1; ++bin_i) {
+            out << " " << std::setw(5) << a.bins()[bin_i];
+         }
+         out << " | " << std::setw(5) << a.bins().back() ;
+      }
+      return out;
+   }
+   enum EStat {
+      kMeasPerTraj,
+      kPartPerTraj,
+      kMeasPt,
+      kPartPt,
+      kNSharedMeasPerTraj,
+      kTrajPerPart,
+      kTrajPerPartWith2Meas,
+      kTrajPerPartWith3Meas,
+      kTrajPerPartWith50Min3Meas,
+      kTrajPerPartWith90Min3Meas,
+      kTrajPerPartWith100Min3Meas,
+      kNStat
+   };
+   constexpr std::array<const char *,kNStat> statNames() {
+      return std::array<const char *,kNStat> {
+            "Hits per track",
+            "Particles per track",
+            "pt at hit",
+            "pt of particle",
+            "shared hits per track",
+            "tracks per particle",
+            "tracks per particle >=2 part. hits",
+            "tracks per particle >=3 part. hits",
+            "tracks per particle >=3 and >=50% part hits",
+            "tracks per particle >=3 and >=90% part hits",
+            "tracks per particle >=3 and >=100% part hits",
+            };
+   }
+
    template <class T>
    double transverseMomentum(const T &param) {
       return param[Acts::eBoundQOverP] != 0. ? std::sin(param[Acts::eBoundTheta]) / std::abs(param[Acts::eBoundQOverP]) : 0.;
@@ -172,6 +270,7 @@ namespace {
       Acts::Vector3 globalPos = surface->localToGlobal(gctx, localPos, Acts::Vector3());
       return globalPos;
    }
+
 }
 
 ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
@@ -214,14 +313,51 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   std::map<std::pair<size_t, size_t>, unsigned int >              trajectoryId;
   std::map<unsigned int, std::pair<size_t, size_t> >              trajectoryIdMap;
   std::map<ActsFatras::Barcode, unsigned int >                    shortParticleId;
+  std::map<ActsFatras::Barcode, size_t >                          barcodeToParticle;
+  std::map<ActsFatras::Barcode, std::map<unsigned int, Counter> > trajectoriesPerParticle;
   std::map<Index, std::set< unsigned int > >                      hitTrajectoryMap;
   std::map<unsigned int, std::vector<Index> >                     trajectoryToHits;
   std::map<unsigned int, std::map<ActsFatras::Barcode, Counter> > trajectoryBarcodeMap;
   std::map<unsigned int, std::map<unsigned int,
                                   const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy> > hitToTrackState;
+
+  static constexpr std::array<double,5 > stat_pt_bins {
+        -1. * Acts::UnitConstants::GeV,
+        0.  * Acts::UnitConstants::GeV,
+        1.  * Acts::UnitConstants::GeV,
+        2.5 * Acts::UnitConstants::GeV,
+        5   * Acts::UnitConstants::GeV};
+  std::array<std::vector<Stat>,stat_pt_bins.size() > stat;
+  for (std::vector<Stat> &a_stat : stat ) {
+     std::vector<Stat> tmp{
+         Stat(15,-0.5,30-0.5), // MeasPerTraj
+         Stat(10,-0.5,10-0.5), // PartPerTraj
+         Stat(10,0,10.), //  kMeasPt,
+         Stat(10,0,10.), //  kPartPt,
+         Stat(15,-0.5,30-0.5), //kNSharedMeasPerTraj
+         Stat(15,0-0.5, 30-0.5), // kTrajPerPart,
+         Stat(15,0-0.5, 30-0.5),// kTrajPerPartWith2Meas,
+         Stat(15,0-0.5, 30-0.5),// kTrajPerPartWith3Meas,
+         Stat(15,0-0.5, 30-0.5),// kTrajPerPartWith50Min3Meas,
+         Stat(15,0-0.5, 30-0.5),// kTrajPerPartWith90in3Meas,
+         Stat(15,0-0.5, 30-0.5)// kTrajPerPartWith100Min3Meas,
+         };
+     a_stat = std::move(tmp);
+     if (a_stat.size() != kNStat) { throw std::logic_error("Stat array has wrong dimension."); }
+  }
+  for (const SimParticle &a_particle : particles) {
+     double particle_pt = a_particle.transverseMomentum();
+     for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
+        if (particle_pt < stat_pt_bins.at(pt_i) ) break;
+        stat.at(pt_i)[kPartPt].add(std::abs(particle_pt));
+     }
+  }
+
   std::map<unsigned int, unsigned int> trajToSeed;
   std::vector<unsigned int> processed;
   std::vector<double>       hit_r;
+  std::vector<double>       traj_assoc_pt;
+
   unsigned int max_hit_index=0;
   // Loop over all trajectories
   for (auto [itraj, trackTip] : trackTips) {
@@ -259,11 +395,69 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
              /*std::pair<std::map<ActsFatras::Barcode, unsigned int >::const_iterator, bool >
                particle_insert =*/ shortParticleId.insert( std::make_pair(hitParticle.second, shortParticleId.size()));
              ++(trajectoryBarcodeMap[ traj_id ][hitParticle.second]);
+             ++(trajectoriesPerParticle[hitParticle.second][ traj_id ]);
           }
           return true;
        });
+       unsigned int        max_count=0;
+       ActsFatras::Barcode max_barcode=0;
+       for (const std::pair<const ActsFatras::Barcode, Counter> &part : trajectoryBarcodeMap[ traj_id ]) {
+          if (part.second.counts() > max_count) {
+             max_barcode=part.first;
+             max_count=part.second.counts();
+          }
+       }
+       auto particle_iter = particles.find(max_barcode);
+       double particle_pt= particle_iter != particles.end()
+          ? particle_iter->transverseMomentum()
+          : -std::numeric_limits<double>::max();
+
+       if (traj_id>=traj_assoc_pt.size()) {
+          traj_assoc_pt.resize(traj_id+1);
+       }
+       traj_assoc_pt.at(traj_id) = particle_pt;
+       for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
+          if (particle_pt < stat_pt_bins.at(pt_i) ) break;
+          stat.at(pt_i)[kPartPerTraj].add( trajectoryBarcodeMap[ traj_id ].size() );
+          stat[pt_i]   [kMeasPerTraj].add( trajectoryToHits[traj_id].size() );
+       }
     }
   }
+
+  for (const std::pair<const ActsFatras::Barcode, std::map<unsigned int, Counter> > &particle_to_trajectories : trajectoriesPerParticle) {
+     auto particle_iter = particles.find(particle_to_trajectories.first);
+     double particle_pt= particle_iter != particles.end()
+        ? particle_iter->transverseMomentum()
+        : -std::numeric_limits<double>::max();
+
+     std::array<unsigned int,6> n_trajectories{};
+     for (const  std::pair<const unsigned int, Counter> &trajectory_hits : particle_to_trajectories.second) {
+        if (trajectory_hits.second.counts()>0) { ++n_trajectories[0]; }
+        if (trajectory_hits.second.counts()>=2) { ++n_trajectories[1]; }
+        if (trajectory_hits.second.counts()>=3) {
+           static const std::array<double,4> fractions{0., 0.5,0.9, .999};
+           unsigned int dest_i=2;
+           unsigned int n_trajectory_hits = trajectoryToHits.at( trajectory_hits.first ).size();
+           for (const double &fraction : fractions) {
+              if (trajectory_hits.second.counts() < fraction * n_trajectory_hits || dest_i >= n_trajectories.size() ) break;
+              ++n_trajectories[ dest_i ];
+              ++dest_i;
+           }
+        }
+     }
+
+     for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
+        if (particle_pt < stat_pt_bins.at(pt_i) ) break;
+        stat.at(pt_i)[kTrajPerPart].add( n_trajectories[0] );
+        stat.at(pt_i)[kTrajPerPartWith2Meas].add( n_trajectories[1] );
+        stat.at(pt_i)[kTrajPerPartWith3Meas].add( n_trajectories[2] );
+        stat.at(pt_i)[kTrajPerPartWith50Min3Meas].add( n_trajectories[3] );
+        stat.at(pt_i)[kTrajPerPartWith90Min3Meas].add( n_trajectories[4] );
+        stat.at(pt_i)[kTrajPerPartWith100Min3Meas].add( n_trajectories[5] );
+     }
+  }
+
+
   processed.reserve(trajectoryIdMap.size());
   hit_r.resize( max_hit_index+1, 0.);
 
@@ -297,10 +491,14 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           hit_r.at(hitIndex) = Acts::VectorHelpers::perp(pos);
        }
        std::sort(all_hits.begin(),all_hits.end());
+       unsigned int n_shared_hits=0;
        for (const Index &hitIndex : hits) {
           std::map<Index, std::set< unsigned int > >::const_iterator
              hit_iter = hitTrajectoryMap.find(hitIndex);
           if (hit_iter != hitTrajectoryMap.end()) {
+             if (hit_iter->second.size()>1) {
+                ++n_shared_hits;
+             }
              for (unsigned int sibling_traj : hit_iter->second) {
                 std::vector<unsigned int>::const_iterator processed_iter = std::lower_bound(processed.begin(), processed.end(), sibling_traj);
                 if (processed_iter == processed.end() || *processed_iter !=sibling_traj) {
@@ -318,6 +516,12 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
              }
           }
        }
+       const double particle_pt = traj_assoc_pt.at(traj_id);
+       for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
+          if (particle_pt < stat_pt_bins.at(pt_i) ) break;
+          stat.at(pt_i)[kNSharedMeasPerTraj].add(n_shared_hits);
+       }
+
        std::sort(all_hits.begin(),all_hits.end(),
                  [&hit_r](Index hit_idx_a, Index hit_idx_b) {
                     return hit_r[hit_idx_a] < hit_r[hit_idx_b]; });
@@ -570,8 +774,14 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                                                                         position[Acts::ePos2],
                                                                         boundParams[Acts::eBoundPhi],
                                                                         boundParams[Acts::eBoundTheta],
-                                                                        std::copysign ( transverseMomentum(boundParams), boundParams[Acts::eBoundQOverP])
+                                                                        std::copysign ( transverseMomentum(boundParams)/Acts::UnitConstants::GeV,
+                                                                                        boundParams[Acts::eBoundQOverP])
                       });
+                   const double a_particle_pt = traj_assoc_pt.at(trajectory.first);
+                   for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
+                      if (a_particle_pt < stat_pt_bins.at(pt_i) ) break;
+                      stat.at(pt_i)[kMeasPt].add(std::abs(trajectory_params.back()[6]));
+                   }
                    has_param=true;
                 }
                 else {
@@ -610,7 +820,21 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
     }
   }
 
-  
+  static const std::array<const char *,kNStat> stat_names( statNames());
+  std::size_t max_length=0;
+  for (const char * a_name : stat_names) {
+     max_length=std::max(max_length, strlen(a_name));
+  }
+  for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
+     std::cout << "-- Statistics pt bin " << stat_pt_bins[pt_i] << " ... "<< std::endl;
+     for (unsigned int stat_i=0; stat_i<stat.at(pt_i).size(); ++stat_i ) {
+        std::cout << stat_names.at(stat_i) << std::setw( 31 - std::min(static_cast<std::size_t>(30),strlen(stat_names.at(stat_i))) )
+                  << " " << stat.at(pt_i).at(stat_i)
+                  << std::endl;
+     }
+     std::cout << std::endl;
+  }
+
   // Loop over all trajectories
   for (auto [itraj, trackTip] : trackTips) {
     const auto& traj = trajectories[itraj];
