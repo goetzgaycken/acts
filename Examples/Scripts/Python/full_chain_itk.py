@@ -78,7 +78,7 @@ addSeeding(
     s,
     trackingGeometry,
     field,
-    TruthSeedRanges(pt=(1.0 * u.GeV, None), eta=(-4.0, 4.0), nHits=(9, None))
+    TruthSeedRanges(pt=(.1 * u.GeV, None), eta=(-4.0, 4.0), nHits=(9, None))
     if ttbar_pu200
     else TruthSeedRanges(),
     *acts.examples.itk.itkSeedingAlgConfig("PixelSpacePoints"),
