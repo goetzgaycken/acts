@@ -146,6 +146,7 @@ public:
 };
 
 namespace {
+   inline double sqr(double a) { return a*a; }
    class Stat {
    public:
       Stat() = default;
@@ -267,6 +268,118 @@ namespace {
       return globalPos;
    }
 
+   void dumpParameters(const std::string &header,
+                       const std::vector<std::array<double,7> > &trajectory_params);
+
+   void dumpParameters(const std::string &header,
+                       const ActsExamples::AlgorithmContext& ctx,
+                       const std::map<unsigned int,Counter> &trajectory_counts,
+                       const std::map<unsigned int,const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy> &hit_states,
+                       std::vector<double> &pt_out) {
+      std::vector<std::array<double,7> > trajectory_params;
+      trajectory_params.reserve( trajectory_counts.size() );
+      bool has_param=false;
+      pt_out.resize(trajectory_counts.size(),-std::numeric_limits<double>::max());
+      unsigned idx=0;
+      for (const std::pair<const unsigned int,Counter> &trajectory : trajectory_counts) {
+         std::map<unsigned int,const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy>::const_iterator
+            traj_iter = hit_states.find(trajectory.first);
+         if (traj_iter != hit_states.end()) {
+            const auto &boundParams = traj_iter->second.parameters();
+            Acts::Vector3 direction = Acts::makeDirectionUnitFromPhiTheta(boundParams[Acts::eBoundPhi],
+                                                                          boundParams[Acts::eBoundTheta]);
+
+            Acts::Vector2 local(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1]);
+            Acts::Vector3 position(traj_iter->second.referenceSurface().localToGlobal(ctx.geoContext, local, direction));
+            trajectory_params.emplace_back(std::array<double,7>{ Acts::VectorHelpers::phi(position),
+                                                                Acts::VectorHelpers::theta(position),
+                                                                Acts::VectorHelpers::perp(position),
+                                                                position[Acts::ePos2],
+                                                                boundParams[Acts::eBoundPhi],
+                                                                boundParams[Acts::eBoundTheta],
+                                                                std::copysign ( transverseMomentum(boundParams)/Acts::UnitConstants::GeV,
+                                                                                boundParams[Acts::eBoundQOverP])
+               });
+            pt_out.at(idx)= std::abs(trajectory_params.back()[6]);
+            has_param=true;
+         }
+         else {
+            trajectory_params.emplace_back(std::array<double,7>{});
+         }
+         ++idx;
+      }
+      if (has_param) {
+         dumpParameters(header, trajectory_params);
+      }
+   }
+   void dumpPerigeeParameters(const std::string &header,
+                              const ActsExamples::AlgorithmContext& ctx,
+                              const std::map<unsigned int,Counter> &trajectory_counts,
+                              const std::map<unsigned int, std::pair<size_t, size_t> > &trajectoryIdMap,
+                              const ActsExamples::TrajectoriesContainer& trajectories,
+                              std::vector<double> &pt_out) {
+      std::vector<std::array<double,7> > trajectory_params;
+      trajectory_params.reserve( trajectory_counts.size() );
+      bool has_param=false;
+      pt_out.resize(trajectory_counts.size(),-std::numeric_limits<double>::max());
+      unsigned idx=0;
+      for (const std::pair<const unsigned int,Counter> &trajectory : trajectory_counts) {
+         std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator traj_iter = trajectoryIdMap.find(trajectory.first);
+         if (traj_iter != trajectoryIdMap.end()) {
+            const auto& traj = trajectories[traj_iter->second.first];
+            const auto& fittedParameters = traj.trackParameters(traj_iter->second.second);
+            const auto& momentum = fittedParameters.momentum();
+            Acts::Vector3 position(fittedParameters.position(ctx.geoContext));
+            trajectory_params.emplace_back(std::array<double,7>{ Acts::VectorHelpers::phi(position),
+                                                                Acts::VectorHelpers::theta(position),
+                                                                Acts::VectorHelpers::perp(position),
+                                                                position[Acts::ePos2],
+                                                                Acts::VectorHelpers::phi(momentum),
+                                                                Acts::VectorHelpers::theta(momentum),
+                                                                std::copysign ( Acts::VectorHelpers::perp(momentum)/Acts::UnitConstants::GeV,
+                                                                                fittedParameters.charge())
+               });
+            pt_out.at(idx)= std::abs(trajectory_params.back()[6]);
+            has_param=true;
+         }
+         else {
+            trajectory_params.emplace_back(std::array<double,7>{});
+         }
+         ++idx;
+      }
+      if (has_param) {
+         dumpParameters(header, trajectory_params);
+      }
+   }
+
+   void dumpParameters(const std::string &header,
+                       const std::vector<std::array<double,7> > &trajectory_params) {
+      static std::array<std::string,7> param_names{"phi","theta","r","z","phi","theta","(+-)pt"};
+      for (unsigned int offset_i=0;offset_i<trajectory_params.size();) {
+         unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_params.size()), offset_i+10);
+         for (unsigned int param_i=0; param_i<7; ++param_i) {
+            if (param_i==0 && offset_i==0) {
+               std::cout << std::setw(4) << header << ") ";
+            }
+            else {
+               std::cout << std::setw(4) << " " << "  ";
+            }
+            std::cout << std::setw(7) << param_names.at(param_i) << " ";
+            for (unsigned int traj_i=offset_i; traj_i<traj_end;++traj_i) {
+               const std::array<double, 7> &param = trajectory_params[traj_i];
+               if (std::abs(param[5])>0) {
+                  std::cout << std::setw(14) << param[param_i];
+               }
+               else {
+                  std::cout << std::setw(14) << " ";
+               }
+            }
+            std::cout << std::endl;
+         }
+         offset_i = traj_end;
+         std::cout << std::endl;
+      }
+   }
 }
 
 ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
@@ -691,6 +804,69 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
 
           }
 
+          for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
+             for (unsigned int pass_i=0; pass_i<4; ++pass_i) {
+             auto particle_iter = particles.find(a_particle.first);
+             if (particle_iter != particles.end()) {
+                
+                std::cout << std::setw(9) << " " << " ";
+                std::cout << std::setw(14) << " " 
+                          << std::setw(14) << " "
+                          << std::setw(14) << " "
+                          << " ";
+
+                for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle_dummy : particle_counts) {
+                   if (a_particle_dummy.second.counts()> 0) {
+                      std::cout << std::setw(14) << " " ;
+                   }
+                }
+                std::cout << " | ";
+                for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
+                   Acts::Vector3 direction( particle_iter->unitDirection() );
+                   std::array<double,3> ref{Acts::VectorHelpers::phi(direction),
+                      Acts::VectorHelpers::theta(direction),
+                      1./copysign(particle_iter->absoluteMomentum(),particle_iter->charge())};
+                
+
+                   std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator traj_iter = trajectoryIdMap.find(a_trajectory.first);
+                   if (traj_iter != trajectoryIdMap.end()) {
+                      const auto& a_traj = trajectories[traj_iter->second.first];
+                      const auto& fittedParameters = a_traj.trackParameters(traj_iter->second.second);
+
+                      if (fittedParameters.covariance()) {
+                         const auto& params = fittedParameters.parameters();
+                         const auto& cov = fittedParameters.covariance().value();
+                         std::array<Acts::BoundIndices,3> indices{
+                            Acts::eBoundPhi,
+                            Acts::eBoundTheta,
+                            Acts::eBoundQOverP};
+                         double chi2=0.;
+                         if (pass_i<indices.size()) {
+                            unsigned int idx=pass_i;
+                            chi2 += sqr( params[indices[idx] ] - ref[idx] ) / cov(indices[idx],indices[idx]);
+                            std::cout << params[indices[idx] ] << " - " << ref[idx] << " / " << sqrt(cov(indices[idx],indices[idx])) << " ";
+                         }
+                         else {
+                            for (unsigned int idx=0; idx < indices.size(); ++idx) {
+                               chi2 += sqr( params[indices[idx] ] - ref[idx] ) / cov(indices[idx],indices[idx]);
+                            }
+                         std::cout << std::setw(14) << chi2;
+                         }
+                      }
+                      else {
+                         std::cout << std::setw(14) << " ";
+                      }
+                   }
+                   else {
+                      std::cout << std::setw(14) << " ";
+                   }
+                }
+                std::cout << std::endl;
+             }
+             }
+          }
+
+
           // -- seed
           std::vector<std::vector<Index> > seed_cluster_idx;
           for (unsigned int offset_i=0;offset_i<trajectory_counts.size();) {
@@ -744,71 +920,74 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           }
           std::cout << std::endl;
 
-          // -- parameters
-          for( const std::pair<const unsigned int, std::map<unsigned int,
-                                                           const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy> >
-                  &hit_states : hitToTrackState ) {
-             std::vector<std::array<double,7> > trajectory_params;
-             trajectory_params.reserve( trajectory_counts.size() );
-             bool has_param=false;
-             for (const std::pair<const unsigned int,Counter> trajectory : trajectory_counts) {
-                std::map<unsigned int,const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy>::const_iterator
-                   traj_iter = hit_states.second.find(trajectory.first);
-                if (traj_iter != hit_states.second.end()) {
-                   const auto &boundParams = traj_iter->second.parameters();
-                   Acts::Vector3 direction = Acts::makeDirectionUnitFromPhiTheta(boundParams[Acts::eBoundPhi],
-                                                                                 boundParams[Acts::eBoundTheta]);
-
-                   Acts::Vector2 local(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1]);
-                   Acts::Vector3 position(traj_iter->second.referenceSurface().localToGlobal(ctx.geoContext, local, direction));
-                   trajectory_params.emplace_back(std::array<double,7>{ Acts::VectorHelpers::phi(position),
-                                                                        Acts::VectorHelpers::theta(position),
-                                                                        Acts::VectorHelpers::perp(position),
-                                                                        position[Acts::ePos2],
-                                                                        boundParams[Acts::eBoundPhi],
-                                                                        boundParams[Acts::eBoundTheta],
-                                                                        std::copysign ( transverseMomentum(boundParams)/Acts::UnitConstants::GeV,
-                                                                                        boundParams[Acts::eBoundQOverP])
-                      });
-                   const double a_particle_pt = traj_assoc_pt.at(trajectory.first);
-                   for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
-                      if (a_particle_pt < stat_pt_bins.at(pt_i) ) break;
-                      stat.at(pt_i)[kMeasPt].add(std::abs(trajectory_params.back()[6]));
+          // -- particles
+          {
+             std::cout << std::setw(4) << " ";
+             for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
+                if (a_particle.second.counts()> 0) {
+                   auto particle_iter = particles.find(a_particle.first);
+                   if (particle_iter != particles.end()) {
+                      std::stringstream barcode_str;
+                      barcode_str << particle_iter->particleId();
+                      std::cout << std::setw(14) << barcode_str.str();
                    }
-                   has_param=true;
-                }
-                else {
-                   trajectory_params.emplace_back(std::array<double,7>{});
+                   else {
+                      std::stringstream barcode_str;
+                      barcode_str << a_particle.first;
+                      std::cout << std::setw(14) << barcode_str.str();
+                   }
                 }
              }
-             if (has_param) {
-                static std::array<std::string,7> param_names{"phi","theta","r","z","phi","theta","(+-)pt"};
-                for (unsigned int offset_i=0;offset_i<trajectory_params.size();) {
-                   unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_params.size()), offset_i+10);
-                   for (unsigned int param_i=0; param_i<7; ++param_i) {
-                      if (param_i==0 && offset_i==0) {
-                         std::cout << std::setw(4) << hit_states.first << ") ";
-                      }
-                      else {
-                         std::cout << std::setw(4) << " " << "  ";
-                      }
-                      std::cout << std::setw(7) << param_names.at(param_i) << " ";
-                      for (unsigned int traj_i=offset_i; traj_i<traj_end;++traj_i) {
-                         const std::array<double, 7> &param = trajectory_params[traj_i];
-                         if (std::abs(param[5])>0) {
-                            std::cout << std::setw(14) << param[param_i];
-                         }
-                         else {
-                            std::cout << std::setw(14) << " ";
-                         }
-                      }
-                      std::cout << std::endl;
+             std::cout << std::endl;
+             std::vector< std::array<double,7> > particle_param;
+             particle_param.reserve( particle_counts.size() );
+             for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
+                if (a_particle.second.counts()> 0) {
+                   auto particle_iter = particles.find(a_particle.first);
+                   if (particle_iter != particles.end()) {
+                      Acts::Vector3 position( particle_iter->position() );
+                      Acts::Vector3 direction( particle_iter->unitDirection() );
+                      particle_param.emplace_back(std::array<double,7>({Acts::VectorHelpers::phi(position),
+                                                  Acts::VectorHelpers::theta(position),
+                                                  Acts::VectorHelpers::perp(position),
+                                                  position[2],
+                                                  Acts::VectorHelpers::phi(direction),
+                                                  Acts::VectorHelpers::theta(direction),
+                                                  std::copysign(particle_iter->transverseMomentum(), particle_iter->charge())} ));
                    }
-                   offset_i = traj_end;
-                   std::cout << std::endl;
+                }
+             }
+             dumpParameters("PART", particle_param);
+          }
+          // -- parameters
+          {
+             std::vector<double> traj_pt;
+             dumpPerigeeParameters("ORIG", ctx, trajectory_counts, trajectoryIdMap, trajectories,traj_pt);
+          }
+          for (const Index &hitIndex : all_hits ) {
+             std::map<const unsigned int, std::map<unsigned int,
+                                                   const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy> >::const_iterator
+                hit_state_iter = hitToTrackState.find(hitIndex);
+             if (hit_state_iter != hitToTrackState.end()) {
+                std::vector<double> traj_pt;
+                std::stringstream header;
+                header << hitIndex;
+                dumpParameters(header.str(), ctx,trajectory_counts, hit_state_iter->second, traj_pt);
+                unsigned idx=0;
+                for (const std::pair<const unsigned int,Counter> &trajectory : trajectory_counts) {
+                   double a_traj_pt=traj_pt.at(idx);
+                   if (a_traj_pt >= 0.) {
+                      const double a_particle_pt = traj_assoc_pt.at(trajectory.first);
+                      for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
+                         if (a_particle_pt < stat_pt_bins.at(pt_i) ) break;
+                         stat.at(pt_i)[kMeasPt].add(a_traj_pt);
+                      }
+                   }
+                   ++idx;
                 }
              }
           }
+          
        }
     }
   }
