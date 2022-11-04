@@ -273,13 +273,15 @@ namespace {
    }
 
    void dumpParameters(const std::string &header,
-                       const std::vector<std::array<double,7> > &trajectory_params);
+                       const std::vector<std::array<double,7> > &trajectory_params,
+                       const unsigned int floats_per_column);
 
    void dumpParameters(const std::string &header,
                        const ActsExamples::AlgorithmContext& ctx,
                        const std::map<unsigned int,Counter> &trajectory_counts,
                        const std::map<unsigned int,const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy> &hit_states,
-                       std::vector<double> &pt_out) {
+                       std::vector<double> &pt_out,
+                       const unsigned int floats_per_column) {
       std::vector<std::array<double,7> > trajectory_params;
       trajectory_params.reserve( trajectory_counts.size() );
       bool has_param=false;
@@ -313,7 +315,7 @@ namespace {
          ++idx;
       }
       if (has_param) {
-         dumpParameters(header, trajectory_params);
+         dumpParameters(header, trajectory_params, floats_per_column);
       }
    }
    void dumpPerigeeParameters(const std::string &header,
@@ -321,7 +323,8 @@ namespace {
                               const std::map<unsigned int,Counter> &trajectory_counts,
                               const std::map<unsigned int, std::pair<size_t, size_t> > &trajectoryIdMap,
                               const ActsExamples::TrajectoriesContainer& trajectories,
-                              std::vector<double> &pt_out) {
+                              std::vector<double> &pt_out,
+                              const unsigned int floats_per_column) {
       std::vector<std::array<double,7> > trajectory_params;
       trajectory_params.reserve( trajectory_counts.size() );
       bool has_param=false;
@@ -352,15 +355,16 @@ namespace {
          ++idx;
       }
       if (has_param) {
-         dumpParameters(header, trajectory_params);
+         dumpParameters(header, trajectory_params, floats_per_column);
       }
    }
 
    void dumpParameters(const std::string &header,
-                       const std::vector<std::array<double,7> > &trajectory_params) {
+                       const std::vector<std::array<double,7> > &trajectory_params,
+                       unsigned int floats_per_column) {
       static std::array<std::string,7> param_names{"phi","theta","r","z","phi","theta","(+-)pt"};
       for (unsigned int offset_i=0;offset_i<trajectory_params.size();) {
-         unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_params.size()), offset_i+10);
+         unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_params.size()), offset_i+floats_per_column);
          for (unsigned int param_i=0; param_i<7; ++param_i) {
             if (param_i==0 && offset_i==0) {
                std::cout << std::setw(4) << header << ") ";
@@ -440,6 +444,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
         1.  * Acts::UnitConstants::GeV,
         2.5 * Acts::UnitConstants::GeV,
         5   * Acts::UnitConstants::GeV};
+  constexpr unsigned int floats_per_col =10;
   std::array<std::vector<Stat>,stat_pt_bins.size() > stat;
   for (std::vector<Stat> &a_stat : stat ) {
      std::vector<Stat> tmp{
@@ -811,75 +816,90 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
 
           }
 
+          static const std::array<const char *,4> pass_labels{"xi2phi","xi2theta","xi2q/p","xi2"};
           for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
-             for (unsigned int pass_i=0; pass_i<4; ++pass_i) {
-             auto particle_iter = particles.find(a_particle.first);
-             if (particle_iter != particles.end()) {
-                
-                std::cout << std::setw(9) << " " << " ";
-                std::cout << std::setw(14) << " " 
-                          << std::setw(14) << " "
-                          << std::setw(14) << " "
-                          << " ";
+             for (unsigned int offset_i=0; offset_i<trajectory_counts.size(); ) {
+                unsigned int offset_end = std::min(static_cast<std::size_t>(offset_i+floats_per_col),trajectory_counts.size());
+                for (unsigned int pass_i=0; pass_i<pass_labels.size(); ++pass_i) {
+                   auto particle_iter = particles.find(a_particle.first);
+                   if (particle_iter != particles.end()) {
 
-                for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle_dummy : particle_counts) {
-                   if (a_particle_dummy.second.counts()> 0) {
-                      std::cout << std::setw(14) << " " ;
-                   }
-                }
-                std::cout << " | ";
-                for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
-                   Acts::Vector3 direction( particle_iter->unitDirection() );
-                   std::array<double,3> ref{Acts::VectorHelpers::phi(direction),
-                      Acts::VectorHelpers::theta(direction),
-                      1./copysign(particle_iter->absoluteMomentum(),particle_iter->charge())};
-                
-
-                   std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator traj_iter = trajectoryIdMap.find(a_trajectory.first);
-                   if (traj_iter != trajectoryIdMap.end()) {
-                      const auto& a_traj = trajectories[traj_iter->second.first];
-                      const auto& fittedParameters = a_traj.trackParameters(traj_iter->second.second);
-
-                      if (fittedParameters.covariance()) {
-                         const auto& params = fittedParameters.parameters();
-                         const auto& cov = fittedParameters.covariance().value();
-                         std::array<Acts::BoundIndices,3> indices{
-                            Acts::eBoundPhi,
-                            Acts::eBoundTheta,
-                            Acts::eBoundQOverP};
-                         double chi2=0.;
-                         if (pass_i<indices.size()) {
-                            unsigned int idx=pass_i;
-                            chi2 += sqr( params[indices[idx] ] - ref[idx] ) / cov(indices[idx],indices[idx]);
-                            std::cout << params[indices[idx] ] << " - " << ref[idx] << " / " << sqrt(cov(indices[idx],indices[idx])) << " ";
-                         }
-                         else {
-                            for (unsigned int idx=0; idx < indices.size(); ++idx) {
-                               chi2 += sqr( params[indices[idx] ] - ref[idx] ) / cov(indices[idx],indices[idx]);
-                            }
-                         std::cout << std::setw(14) << chi2;
-                         }
+                      if (pass_i==0) {
+                         std::cout << std::setw(16) << a_particle.first;
                       }
                       else {
-                         std::cout << std::setw(14) << " ";
+                         std::cout << std::setw(16) << " ";
+                      }
+                      std::cout << " " << std::setw(8) << pass_labels[pass_i] << ") ";
+                      // std::cout << std::setw(14) << " "
+                      //           << std::setw(14) << " "
+                      //           << std::setw(14) << " "
+                      //           << " ";
+
+                      // for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle_dummy : particle_counts) {
+                      //    if (a_particle_dummy.second.counts()> 0) {
+                      //       std::cout << std::setw(14) << " " ;
+                      //    }
+                      // }
+                      // std::cout << " | ";
+                      unsigned int traj_i=0;
+                      for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
+                         if (traj_i++>= offset_i) {
+                            if (traj_i >= offset_end) break;
+
+                            Acts::Vector3 direction( particle_iter->unitDirection() );
+                            std::array<double,3> ref{Acts::VectorHelpers::phi(direction),
+                               Acts::VectorHelpers::theta(direction),
+                               1./copysign(particle_iter->absoluteMomentum(),particle_iter->charge())};
+
+                            std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator traj_iter = trajectoryIdMap.find(a_trajectory.first);
+                            if (traj_iter != trajectoryIdMap.end()) {
+                               const auto& a_traj = trajectories[traj_iter->second.first];
+                               const auto& fittedParameters = a_traj.trackParameters(traj_iter->second.second);
+
+                               if (fittedParameters.covariance()) {
+                                  const auto& params = fittedParameters.parameters();
+                                  const auto& cov = fittedParameters.covariance().value();
+                                  std::array<Acts::BoundIndices,3> indices{
+                                     Acts::eBoundPhi,
+                                     Acts::eBoundTheta,
+                                     Acts::eBoundQOverP};
+                                  double chi2=0.;
+                                  if (pass_i<indices.size()) {
+                                     unsigned int idx=pass_i;
+                                     chi2 += sqr( params[indices[idx] ] - ref[idx] ) / cov(indices[idx],indices[idx]);
+                                     //  std::cout << params[indices[idx] ] << " - " << ref[idx] << " / " << sqrt(cov(indices[idx],indices[idx])) << " ";
+                                  }
+                                  else {
+                                     for (unsigned int idx=0; idx < indices.size(); ++idx) {
+                                        chi2 += sqr( params[indices[idx] ] - ref[idx] ) / cov(indices[idx],indices[idx]);
+                                     }
+                                     std::cout << std::setw(14) << chi2;
+                                  }
+                               }
+                               else {
+                                  std::cout << std::setw(14) << " ";
+                               }
+                            }
+                            else {
+                               std::cout << std::setw(14) << " ";
+                            }
+                         }
                       }
                    }
-                   else {
-                      std::cout << std::setw(14) << " ";
-                   }
                 }
-                std::cout << std::endl;
-             }
+                offset_i = offset_end;
              }
           }
+
 
 
           // -- seed
           std::vector<std::vector<Index> > seed_cluster_idx;
           for (unsigned int offset_i=0;offset_i<trajectory_counts.size();) {
-             unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_counts.size()), offset_i+10);
+             unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_counts.size()), offset_i+floats_per_col);
              seed_cluster_idx.clear();
-             seed_cluster_idx.reserve(10);
+             seed_cluster_idx.reserve(floats_per_col);
              bool have_idx=true;
              for (unsigned pass_i=0; have_idx; ++pass_i) {
                 unsigned int counter_i=0;
@@ -964,12 +984,12 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                    }
                 }
              }
-             dumpParameters("PART", particle_param);
+             dumpParameters("PART", particle_param, floats_per_col);
           }
           // -- parameters
           {
              std::vector<double> traj_pt;
-             dumpPerigeeParameters("ORIG", ctx, trajectory_counts, trajectoryIdMap, trajectories,traj_pt);
+             dumpPerigeeParameters("ORIG", ctx, trajectory_counts, trajectoryIdMap, trajectories,traj_pt, floats_per_col);
           }
           for (const Index &hitIndex : all_hits ) {
              std::map<const unsigned int, std::map<unsigned int,
@@ -979,7 +999,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                 std::vector<double> traj_pt;
                 std::stringstream header;
                 header << hitIndex;
-                dumpParameters(header.str(), ctx,trajectory_counts, hit_state_iter->second, traj_pt);
+                dumpParameters(header.str(), ctx,trajectory_counts, hit_state_iter->second, traj_pt, floats_per_col);
                 unsigned idx=0;
                 for (const std::pair<const unsigned int,Counter> &trajectory : trajectory_counts) {
                    double a_traj_pt=traj_pt.at(idx);
