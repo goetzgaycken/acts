@@ -271,7 +271,43 @@ namespace {
       Acts::Vector3 globalPos = surface->localToGlobal(gctx, localPos, Acts::Vector3());
       return globalPos;
    }
-
+   double computeChi2ForHit(const Acts::Vector2 &hitPos,
+                            const Acts::Vector2 &fitPos,
+                            const Acts::Vector2 &fitPosCovDiag) {
+      double chi2=0.;
+      for (unsigned int idx=0; idx < hitPos.size(); ++idx) {
+         if (fitPosCovDiag[idx]>1e-6) {
+            chi2+=sqr(hitPos[idx]-fitPos[idx])/fitPosCovDiag[idx];
+         }
+      }
+      return chi2;
+   }
+   std::pair<double, unsigned int> modifiedChi2(const std::tuple<double, unsigned int, std::array<float, 4> > &chi2) {
+      static unsigned int debug_counter=100;
+      std::pair<double, unsigned int>  ret = std::make_pair(std::get<0>(chi2),std::get<1>(chi2) ) ;
+      if (ret.second>1 && ret.first>0.) {
+         double old_chi2=ret.first;// / ret.second;
+         for (unsigned int arr_i=0; arr_i< std::get<2>(chi2).size();  ++arr_i) {
+            double mod_chi2 = (ret.first - std::get<2>(chi2).at(arr_i));
+               // / (ret.second - 1);
+            if (++debug_counter<100) {
+               std::cerr << "DEBUG modifiedChi2 " << arr_i << " : " << old_chi2
+                         << " -> " << ret.first
+                         << " - " << std::get<2>(chi2).at(arr_i) << " / " << (ret.second - 1) 
+                         << " = " << mod_chi2
+                         << " ( " << (mod_chi2/old_chi2) << " )"
+                         << std::endl;
+            }
+            if ((old_chi2 - mod_chi2) * ret.second < 3 * old_chi2 ) break;
+            old_chi2 = mod_chi2;
+            ret.first -= std::get<2>(chi2).at(arr_i);
+            --ret.second;
+            if (ret.second<=1 || ret.second <= 3 * ret.first) break;
+         }
+      }
+      return ret;
+   }
+      
    void dumpParameters(const std::string &header,
                        const std::vector<std::array<double,7> > &trajectory_params,
                        const unsigned int floats_per_column);
@@ -475,8 +511,11 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   std::vector<unsigned int> processed;
   std::vector<double>       hit_r;
   std::vector<double>       traj_assoc_pt;
+  std::vector<std::map<ActsFatras::Barcode,std::tuple<double, unsigned int, std::array<float, 4> > > >      hit_chi2;
+  std::map<ActsFatras::Barcode, unsigned int >                                      particle_n_hits;
 
   unsigned int max_hit_index=0;
+  static unsigned int debug_counter=0;
   // Loop over all trajectories
   for (auto [itraj, trackTip] : trackTips) {
     const auto& traj = trajectories[itraj];
@@ -495,6 +534,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           trajectoryIdMap.insert( std::make_pair( ret.first->second, ret.first->first) );
        }
        unsigned int traj_id=ret.first->second;
+       if (traj_id>=hit_chi2.size()) { hit_chi2.resize( traj_id + 1); }
        trajToSeed.insert( std::make_pair(traj_id, seed_i));
        traj.multiTrajectory().visitBackwards(trackTip, [&](const auto& state) {
           // no truth info with non-measurement state
@@ -514,6 +554,53 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                particle_insert =*/ shortParticleId.insert( std::make_pair(hitParticle.second, shortParticleId.size()));
              ++(trajectoryBarcodeMap[ traj_id ][hitParticle.second]);
              ++(trajectoriesPerParticle[hitParticle.second][ traj_id ]);
+
+             {
+                const auto &boundParams = state.parameters();
+                const auto &cov = state.covariance();
+                Acts::Vector2(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1]);
+                std::size_t n_measurements = 0;
+                Acts::Vector2 localPos = std::visit(
+                                                    [&n_measurements](const auto& measurement) {
+                                                       auto expander = measurement.expander();
+                                                       Acts::BoundVector par = expander * measurement.parameters();
+                                                       Acts::Vector2 lpar(par[Acts::eBoundLoc0], par[Acts::eBoundLoc1]);
+                                                       n_measurements=measurement.size();
+                                                       return lpar;
+                                                    },
+                                                    measurements.at(hitIndex));
+                double a_hit_chi2 = computeChi2ForHit(/*ctx.geoContext,*/
+                                                      localPos,
+                                                      Acts::Vector2(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1]),
+                                                      Acts::Vector2(cov(Acts::eBoundLoc0,Acts::eBoundLoc0), cov(Acts::eBoundLoc1,Acts::eBoundLoc1))
+                                                      );
+             
+                std::pair<std::map<ActsFatras::Barcode,std::tuple<double, unsigned int, std::array<float, 4> > >::iterator,bool>
+                   insert_result  = hit_chi2.at(traj_id).insert(std::make_pair(hitParticle.second, std::make_tuple(a_hit_chi2,1,std::array<float,4>{})));
+                if (!insert_result.second && insert_result.first != hit_chi2.at(traj_id).end()) {
+                   std::get<0>(insert_result.first->second) += a_hit_chi2;
+                   ++std::get<1>(insert_result.first->second);
+                   if (std::get<2>(insert_result.first->second).back() < a_hit_chi2) {
+                      unsigned int arr_i=std::get<2>(insert_result.first->second).size();
+                      for (;arr_i-->1 && std::get<2>(insert_result.first->second).at(arr_i-1)<a_hit_chi2;) {
+                         std::get<2>(insert_result.first->second).at(arr_i) = std::get<2>(insert_result.first->second).at(arr_i-1);
+                      }
+                      std::get<2>(insert_result.first->second).at(arr_i)=a_hit_chi2;
+                   }
+                }
+             
+             if (debug_counter++ < 1000) {
+                std::cout << "DEBUG hit " << hitIndex << " measurement " <<  localPos
+                          <<  " fit " << Acts::Vector2(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1])
+                          << " +- " << Acts::Vector2(cov(Acts::eBoundLoc0,Acts::eBoundLoc0), cov(Acts::eBoundLoc1,Acts::eBoundLoc1))
+                          << " -> " << a_hit_chi2
+                          << " -> " << ( insert_result.first != hit_chi2.at(traj_id).end() ? std::get<0>(insert_result.first->second) : 0.) 
+                          << " /  " << ( insert_result.first != hit_chi2.at(traj_id).end() ? std::get<1>(insert_result.first->second) : static_cast<unsigned int>(0))
+                          << " | " << n_measurements
+                          << std::endl;
+             }
+             }
+             
           }
           return true;
        });
@@ -611,6 +698,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
        std::sort(all_hits.begin(),all_hits.end());
        unsigned int n_shared_hits=0;
        for (const Index &hitIndex : hits) {
+
           std::map<Index, std::set< unsigned int > >::const_iterator
              hit_iter = hitTrajectoryMap.find(hitIndex);
           if (hit_iter != hitTrajectoryMap.end()) {
@@ -645,6 +733,13 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                     return hit_r[hit_idx_a] < hit_r[hit_idx_b]; });
 
        for (const Index &hitIndex : all_hits ) {
+          for (auto hitParticle : makeRange(hitParticlesMap.equal_range(hitIndex))) {
+             std::pair<std::map<ActsFatras::Barcode, unsigned int >::iterator, bool>
+                ret = particle_n_hits.insert( std::make_pair(hitParticle.second, 1 ));
+             if (!ret.second && ret.first != particle_n_hits.end()) {
+                ++ret.first->second;
+             }
+          }
 
           std::map<Index, std::set< unsigned int > >::const_iterator
              hit_iter = hitTrajectoryMap.find(hitIndex);
@@ -792,6 +887,48 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                 for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
                    bool has=hit_iter->second.find(a_trajectory.first) != hit_iter->second.end();
                    if (has) {
+                      unsigned int a_traj_id = a_trajectory.first;
+                      bool outlier=false;
+                      for (auto hitParticle : makeRange(hitParticlesMap.equal_range(hitIndex))) {
+                         std::map<ActsFatras::Barcode,std::tuple<double, unsigned int, std::array<float, 4> > >::const_iterator
+                            matched_n_hits_iter = hit_chi2.at(a_traj_id).find(hitParticle.second);
+                         if (matched_n_hits_iter != hit_chi2.at(a_traj_id).end()) {
+                            std::map<const unsigned int, std::map<unsigned int,
+                                                                  const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy> >::const_iterator
+                               hit_state_iter = hitToTrackState.find(hitIndex);
+                            if (hit_state_iter != hitToTrackState.end()) {
+                               std::map<unsigned int,
+                                        const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy>::const_iterator
+                                  state_iter = hit_state_iter->second.find(a_trajectory.first);
+                               if (state_iter != hit_state_iter->second.end()) {
+                                  const auto &boundParams = state_iter->second.parameters();
+                                  const auto &cov = state_iter->second.covariance();
+                                  Acts::Vector2(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1]);
+                                  Acts::Vector2 localPos = std::visit(
+                                                                      [](const auto& measurement) {
+                                                                         auto expander = measurement.expander();
+                                                                         Acts::BoundVector par = expander * measurement.parameters();
+                                                                         Acts::Vector2 lpar(par[Acts::eBoundLoc0], par[Acts::eBoundLoc1]);
+                                                                         return lpar;
+                                                                      },
+                                                                      measurements.at(hitIndex));
+                                  double a_hit_chi2 = computeChi2ForHit(/*ctx.geoContext,*/
+                                                                        localPos,
+                                                                        Acts::Vector2(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1]),
+                                                                        Acts::Vector2(cov(Acts::eBoundLoc0,Acts::eBoundLoc0), cov(Acts::eBoundLoc1,Acts::eBoundLoc1))
+                                                                        );
+                                  // double traj_chi2 = std::get<0>(matched_n_hits_iter->second);
+                                  // unsigned int ndf = std::get<1>(matched_n_hits_iter->second);
+                                  //              if (a_hit_chi2 * ndf > 3 * traj_chi2 ) {
+                                  if (a_hit_chi2 > 6  ) {
+                                     outlier=true;
+                                  }
+                               }
+                            }
+                         }
+                         
+                      }
+
                       bool is_seed=false;
                       std::map< unsigned int, unsigned int>::const_iterator
                          iter = trajToSeed.find(a_trajectory.first);
@@ -805,7 +942,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                             }
                          }
                       }
-                      std::cout << std::setw(5) << a_trajectory.first << (is_seed ? "*" : " ");
+                      std::cout << std::setw(5) << a_trajectory.first << (is_seed ? (outlier ? "x" : "*") : (outlier ? ">" : " "));
                    }
                    else {
                       std::cout << std::setw(5) << " " << " ";
@@ -816,7 +953,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
 
           }
 
-          static const std::array<const char *,4> pass_labels{"xi2phi","xi2theta","xi2q/p","xi2"};
+          static const std::array<const char *,9> pass_labels{"xi2phi","xi2theta","xi2q/p","xi2","match", "xi2hits", "ndf", "xi2hits'", "ndf'"};
           for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
              for (unsigned int offset_i=0; offset_i<trajectory_counts.size(); ) {
                 unsigned int offset_end = std::min(static_cast<std::size_t>(offset_i+floats_per_col),trajectory_counts.size());
@@ -825,7 +962,9 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                    if (particle_iter != particles.end()) {
 
                       if (pass_i==0) {
-                         std::cout << std::setw(16) << a_particle.first;
+                         std::stringstream tmp;
+                         tmp << a_particle.first;
+                         std::cout << std::setw(16) << tmp.str();
                       }
                       else {
                          std::cout << std::setw(16) << " ";
@@ -845,36 +984,41 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                       unsigned int traj_i=0;
                       for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
                          if (traj_i++>= offset_i) {
-                            if (traj_i >= offset_end) break;
+                            if (traj_i > offset_end) break;
 
-                            Acts::Vector3 direction( particle_iter->unitDirection() );
-                            std::array<double,3> ref{Acts::VectorHelpers::phi(direction),
-                               Acts::VectorHelpers::theta(direction),
-                               1./copysign(particle_iter->absoluteMomentum(),particle_iter->charge())};
+                            if (pass_i<4) {
+                               Acts::Vector3 direction( particle_iter->unitDirection() );
+                               std::array<double,3> ref{Acts::VectorHelpers::phi(direction),
+                                  Acts::VectorHelpers::theta(direction),
+                                  1./copysign(particle_iter->absoluteMomentum(),particle_iter->charge())};
 
-                            std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator traj_iter = trajectoryIdMap.find(a_trajectory.first);
-                            if (traj_iter != trajectoryIdMap.end()) {
-                               const auto& a_traj = trajectories[traj_iter->second.first];
-                               const auto& fittedParameters = a_traj.trackParameters(traj_iter->second.second);
+                               std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator traj_iter = trajectoryIdMap.find(a_trajectory.first);
+                               if (traj_iter != trajectoryIdMap.end()) {
+                                  const auto& a_traj = trajectories[traj_iter->second.first];
+                                  const auto& fittedParameters = a_traj.trackParameters(traj_iter->second.second);
 
-                               if (fittedParameters.covariance()) {
-                                  const auto& params = fittedParameters.parameters();
-                                  const auto& cov = fittedParameters.covariance().value();
-                                  std::array<Acts::BoundIndices,3> indices{
-                                     Acts::eBoundPhi,
-                                     Acts::eBoundTheta,
-                                     Acts::eBoundQOverP};
-                                  double chi2=0.;
-                                  if (pass_i<indices.size()) {
-                                     unsigned int idx=pass_i;
-                                     chi2 += sqr( params[indices[idx] ] - ref[idx] ) / cov(indices[idx],indices[idx]);
-                                     //  std::cout << params[indices[idx] ] << " - " << ref[idx] << " / " << sqrt(cov(indices[idx],indices[idx])) << " ";
-                                  }
-                                  else {
-                                     for (unsigned int idx=0; idx < indices.size(); ++idx) {
+                                  if (fittedParameters.covariance()) {
+                                     const auto& params = fittedParameters.parameters();
+                                     const auto& cov = fittedParameters.covariance().value();
+                                     std::array<Acts::BoundIndices,3> indices{
+                                        Acts::eBoundPhi,
+                                        Acts::eBoundTheta,
+                                        Acts::eBoundQOverP};
+                                     double chi2=0.;
+                                     if (pass_i<indices.size()) {
+                                        unsigned int idx=pass_i;
                                         chi2 += sqr( params[indices[idx] ] - ref[idx] ) / cov(indices[idx],indices[idx]);
+                                        //  std::cout << params[indices[idx] ] << " - " << ref[idx] << " / " << sqrt(cov(indices[idx],indices[idx])) << " ";
+                                     }
+                                     else {
+                                        for (unsigned int idx=0; idx < indices.size(); ++idx) {
+                                           chi2 += sqr( params[indices[idx] ] - ref[idx] ) / cov(indices[idx],indices[idx]);
+                                        }
                                      }
                                      std::cout << std::setw(14) << chi2;
+                                  }
+                                  else {
+                                     std::cout << std::setw(14) << " ";
                                   }
                                }
                                else {
@@ -882,11 +1026,85 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                                }
                             }
                             else {
-                               std::cout << std::setw(14) << " ";
+                               switch (pass_i) {
+                               case 4 : {
+                                  unsigned int a_traj_id = a_trajectory.first;
+                                  std::map<ActsFatras::Barcode, unsigned int >::const_iterator
+                                     n_particle_hits_iter =  particle_n_hits.find(a_particle.first);
+                                  std::map<ActsFatras::Barcode,std::tuple<double, unsigned int, std::array<float, 4> > >::const_iterator
+                                     matched_n_hits_iter = hit_chi2.at(a_traj_id).find(a_particle.first);
+                                  if (n_particle_hits_iter != particle_n_hits.end() && matched_n_hits_iter != hit_chi2.at(a_traj_id).end()) {
+                                     std::cout << std::setw(14) << ( n_particle_hits_iter->second > 0
+                                                                     ? std::get<1>(matched_n_hits_iter->second) / (1. * n_particle_hits_iter->second)
+                                                                     : 0.);
+                                  }
+                                  else {
+                                     std::cout << std::setw(14) << " ";
+                                  }
+                                  
+                                  break;
+                               }
+                               case 5 : {
+                                  unsigned int a_traj_id = a_trajectory.first;
+                                  std::map<ActsFatras::Barcode,std::tuple<double, unsigned int, std::array<float, 4> > >::const_iterator
+                                     matched_n_hits_iter = hit_chi2.at(a_traj_id).find(a_particle.first);
+                                  if (matched_n_hits_iter != hit_chi2.at(a_traj_id).end()) {
+                                     std::cout << std::setw(14) << ( std::get<1>(matched_n_hits_iter->second) > 0
+                                                                     ? std::get<0>(matched_n_hits_iter->second) / std::get<1>(matched_n_hits_iter->second)
+                                                                     : 0. );
+                                  }
+                                  else {
+                                     std::cout << std::setw(14) << " ";
+                                  }
+                                  break;
+                               }
+                               case 6 : {
+                                  unsigned int a_traj_id = a_trajectory.first;
+                                  std::map<ActsFatras::Barcode,std::tuple<double, unsigned int, std::array<float, 4> > >::const_iterator
+                                     matched_n_hits_iter = hit_chi2.at(a_traj_id).find(a_particle.first);
+                                  if (matched_n_hits_iter != hit_chi2.at(a_traj_id).end()) {
+                                     std::cout << std::setw(14) << std::get<1>(matched_n_hits_iter->second);
+                                  }
+                                  else {
+                                     std::cout << std::setw(14) << " ";
+                                  }
+                                  break;
+                               }
+                               case 7 : {
+                                  unsigned int a_traj_id = a_trajectory.first;
+                                  std::map<ActsFatras::Barcode,std::tuple<double, unsigned int, std::array<float, 4> > >::const_iterator
+                                     matched_n_hits_iter = hit_chi2.at(a_traj_id).find(a_particle.first);
+                                  if (matched_n_hits_iter != hit_chi2.at(a_traj_id).end()) {
+                                     std::pair<double, unsigned int> mod_chi2 = modifiedChi2(matched_n_hits_iter->second);
+                                     std::cout << std::setw(14) << ( mod_chi2.second > 1
+                                                                     ? (mod_chi2.first / mod_chi2.second)
+                                                                     : mod_chi2.first );
+                                  }
+                                  else {
+                                     std::cout << std::setw(14) << " ";
+                                  }
+                                  break;
+                               }
+                               case 8 : {
+                                  unsigned int a_traj_id = a_trajectory.first;
+                                  std::map<ActsFatras::Barcode,std::tuple<double, unsigned int, std::array<float, 4> > >::const_iterator
+                                     matched_n_hits_iter = hit_chi2.at(a_traj_id).find(a_particle.first);
+                                  if (matched_n_hits_iter != hit_chi2.at(a_traj_id).end()) {
+                                     std::pair<double, unsigned int> mod_chi2 = modifiedChi2(matched_n_hits_iter->second);
+                                     std::cout << std::setw(14) << mod_chi2.second ;
+                                  }
+                                  else {
+                                     std::cout << std::setw(14) << " ";
+                                  }
+                                  break;
+                               }
+                               }
+                                  
                             }
                          }
                       }
                    }
+                   std::cout << std::endl;
                 }
                 offset_i = offset_end;
              }
@@ -905,7 +1123,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                 unsigned int counter_i=0;
                 unsigned int elm_i=0;
                 have_idx=(pass_i==0);
-                std::cout << std::setw(4) << " " << "  ";
+                std::cout << std::setw(16) << " " << " " << std::setw(8) << "seedhits" << "  "; 
                 for (const std::pair<const unsigned int,Counter> trajectory : trajectory_counts) {
                    if (counter_i++>=offset_i) {
                       if (pass_i==0) {
