@@ -25,6 +25,9 @@
 #include "ActsExamples/EventData/Measurement.hpp"
 #include "Acts/Definitions/Units.hpp"
 
+#include "Acts/Visualization/ObjVisualization3D.hpp"
+#include "Acts/Visualization/EventDataView3D.hpp"
+
 #include <numeric>
 #include <stdexcept>
 
@@ -177,15 +180,15 @@ namespace {
       void setBinning(unsigned int n_bins, double lower_edge, double upper_edge) {
          m_bins.clear();
          m_bins.resize(n_bins+2,0);
-         m_lowerEdge=lower_edge;
          m_scale = n_bins / (upper_edge - lower_edge);
+         m_lowerEdge=lower_edge-binWidth();
       }
       unsigned int bin( double value) {
          return value < m_lowerEdge ? 0 : std::min(m_bins.size()-1,
                                                    static_cast<std::size_t>( (value - m_lowerEdge) * m_scale));
       }
-      double lowerEdge() const { return m_lowerEdge; }
-      double upperEdge() const { return m_lowerEdge + (m_bins.size()-2)/m_scale; }
+      double lowerEdge() const { return m_lowerEdge + binWidth(); }
+      double upperEdge() const { return m_lowerEdge + (m_bins.size()-1)/m_scale; }
       double binWidth()  const { return 1/m_scale; }
       const std::vector<unsigned short> &bins() const { return m_bins; }
       void fill(double value) {
@@ -224,6 +227,7 @@ namespace {
       kTrajPerPartWith50Min3Meas,
       kTrajPerPartWith90Min3Meas,
       kTrajPerPartWith100Min3Meas,
+      kNParticles,
       kNStat
    };
    constexpr std::array<const char *,kNStat> statNames() {
@@ -239,6 +243,7 @@ namespace {
             "tracks per particle >=3 and >=50% part hits",
             "tracks per particle >=3 and >=90% part hits",
             "tracks per particle >=3 and >=100% part hits",
+            "particles per hit",
             };
    }
 
@@ -487,7 +492,8 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
          Stat(15,0-0.5, 30-0.5),// kTrajPerPartWith3Meas,
          Stat(15,0-0.5, 30-0.5),// kTrajPerPartWith50Min3Meas,
          Stat(15,0-0.5, 30-0.5),// kTrajPerPartWith90in3Meas,
-         Stat(15,0-0.5, 30-0.5)// kTrajPerPartWith100Min3Meas,
+         Stat(15,0-0.5, 30-0.5),// kTrajPerPartWith100Min3Meas,
+         Stat(10,0-0.5, 10-0.5)// kNParticles
          };
      a_stat = std::move(tmp);
      if (a_stat.size() != kNStat) { throw std::logic_error("Stat array has wrong dimension."); }
@@ -500,6 +506,23 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
      }
   }
 
+  for (unsigned int meas_i=0; meas_i<measurements.size(); ++meas_i) {
+     std::array<unsigned int, stat_pt_bins.size()> hit_share_count{};
+     for (auto hitParticle : makeRange(hitParticlesMap.equal_range(meas_i))) {
+        auto particle_iter = particles.find(hitParticle.second);
+        if (particle_iter != particles.end()) {
+           double particle_pt = particle_iter->transverseMomentum();
+           for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
+              if (particle_pt < stat_pt_bins.at(pt_i) ) break;
+              ++hit_share_count[pt_i];
+           }
+        }
+     }
+     for (unsigned int pt_i=0; pt_i < hit_share_count.size(); ++pt_i) {
+        stat[pt_i]   [kNParticles].add( hit_share_count[pt_i] );
+     }
+  }
+
   std::map<unsigned int, unsigned int> trajToSeed;
   std::vector<unsigned int> processed;
   std::vector<double>       hit_r;
@@ -508,6 +531,9 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   std::map<ActsFatras::Barcode, unsigned int >                                      particle_n_hits;
 
   unsigned int max_hit_index=0;
+  unsigned int plot_i=0;
+  std::set<unsigned int> visualised;
+
   static unsigned int debug_counter=0;
   // Loop over all trajectories
   for (auto [itraj, trackTip] : trackTips) {
@@ -529,6 +555,9 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
        unsigned int traj_id=ret.first->second;
        if (traj_id>=hit_chi2.size()) { hit_chi2.resize( traj_id + 1); }
        trajToSeed.insert( std::make_pair(traj_id, seed_i));
+       bool visualize=false;
+       bool dump_all=false;
+       int state_i=0;
        traj.multiTrajectory().visitBackwards(trackTip, [&](const auto& state) {
           // no truth info with non-measurement state
           if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
@@ -551,6 +580,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
              {
                 const auto &boundParams = state.parameters();
                 const auto &cov = state.covariance();
+
                 Acts::Vector2(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1]);
                 std::size_t n_measurements = 0;
                 Acts::Vector2 localPos = std::visit(
@@ -562,12 +592,41 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                                                        return lpar;
                                                     },
                                                     measurements.at(hitIndex));
+                if (cov(Acts::eBoundLoc1,Acts::eBoundLoc1)<1e-6 || dump_all) {
+                   if (debug_counter < 1000) {
+                   visualize=true;
+                   Acts::Vector3 pos( globalCoords(*(m_cfg.trackingGeometry), ctx.geoContext,measurements.at(hitIndex)) );
+                   const auto &meas_calibrated = state.effectiveCalibrated();
+                   const auto &calib_cov = state.effectiveCalibratedCovariance();
+                   if (debug_counter<2) {
+                      dump_all=true;
+                   }
+
+                   std::cout << "DEBUG " 
+                             << (cov(Acts::eBoundLoc1,Acts::eBoundLoc1)<1e-6 ? "suspicious loc1 cov in " : "" )
+                             << " trajectory " << itraj << ", " << trackTip
+                             << " state " << --state_i << " measurement : (r,phi,z) = ( " << Acts::VectorHelpers::perp(pos)
+                             << ", " << Acts::VectorHelpers::phi(pos)
+                             << ", " << pos[2] << " )"
+                             << " : has "
+                             << ( state.hasPredicted() ?  "PREDICTED " : "")
+                             << ( state.hasFiltered()  ?  "FILTERED "  : "")
+                             << ( state.hasSmoothed()  ?  "SMOOTHED "  : "") << std::endl
+                             << " measurement " <<  meas_calibrated.transpose() << std::endl
+                             << calib_cov << std::endl
+                             << " parameters: " << boundParams.transpose() << std::endl
+                             << " cov predicted: " << std::endl << ( state.hasPredicted() ?  state.predictedCovariance() : cov) << std::endl
+                             << " cov filtered: " << std::endl << ( state.hasFiltered()   ?  state.filteredCovariance() : cov) << std::endl
+                             << " cov smoothed: " << std::endl<< ( state.hasSmoothed()   ?  state.smoothedCovariance() : cov) << std::endl
+                             << std::endl;
+                   }
+                }
                 double a_hit_chi2 = computeChi2ForHit(/*ctx.geoContext,*/
                                                       localPos,
                                                       Acts::Vector2(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1]),
                                                       Acts::Vector2(cov(Acts::eBoundLoc0,Acts::eBoundLoc0), cov(Acts::eBoundLoc1,Acts::eBoundLoc1))
                                                       );
-             
+
                 std::pair<std::map<ActsFatras::Barcode,std::tuple<double, unsigned int, std::array<float, 4> > >::iterator,bool>
                    insert_result  = hit_chi2.at(traj_id).insert(std::make_pair(hitParticle.second, std::make_tuple(a_hit_chi2,1,std::array<float,4>{})));
                 if (!insert_result.second && insert_result.first != hit_chi2.at(traj_id).end()) {
@@ -581,22 +640,38 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                       std::get<2>(insert_result.first->second).at(arr_i)=a_hit_chi2;
                    }
                 }
-             
+
              if (debug_counter++ < 1000) {
+                const auto &meas_calibrated = state.effectiveCalibrated();
+                const auto &calib_cov = state.effectiveCalibratedCovariance();
                 std::cout << "DEBUG hit " << hitIndex << " measurement " <<  localPos
+                          << "(" << meas_calibrated << ")"
                           <<  " fit " << Acts::Vector2(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1])
                           << " +- " << Acts::Vector2(cov(Acts::eBoundLoc0,Acts::eBoundLoc0), cov(Acts::eBoundLoc1,Acts::eBoundLoc1))
+                          << " (+- " << Acts::Vector2(calib_cov(Acts::eBoundLoc0,Acts::eBoundLoc0), calib_cov(Acts::eBoundLoc1,Acts::eBoundLoc1))
+                          << " )"
                           << " -> " << a_hit_chi2
-                          << " -> " << ( insert_result.first != hit_chi2.at(traj_id).end() ? std::get<0>(insert_result.first->second) : 0.) 
+                          << " (" << state.chi2() << ") "
+                          << " -> " << ( insert_result.first != hit_chi2.at(traj_id).end() ? std::get<0>(insert_result.first->second) : 0.)
                           << " /  " << ( insert_result.first != hit_chi2.at(traj_id).end() ? std::get<1>(insert_result.first->second) : static_cast<unsigned int>(0))
                           << " | " << n_measurements
                           << std::endl;
              }
              }
-             
+
           }
           return true;
        });
+       if (visualize) {
+          Acts::ObjVisualization3D visualizer;
+          Acts::EventDataView3D::drawMultiTrajectory(visualizer,  traj.multiTrajectory(), trackTip, ctx.geoContext);
+          std::stringstream file_name;
+          file_name << "/tmp/traj_" << plot_i << "_" << itraj<< "_" << trackTip << ".obj";
+          std::ofstream out(file_name.str().c_str());
+          visualizer.write(out);
+          visualizer.clear();
+          ++plot_i;
+       }
        unsigned int        max_count=0;
        ActsFatras::Barcode max_barcode=0;
        for (const std::pair<const ActsFatras::Barcode, Counter> &part : trajectoryBarcodeMap[ traj_id ]) {
@@ -727,6 +802,8 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
 
        for (const Index &hitIndex : all_hits ) {
           for (auto hitParticle : makeRange(hitParticlesMap.equal_range(hitIndex))) {
+             ++(particle_counts[hitParticle.second]);
+
              std::pair<std::map<ActsFatras::Barcode, unsigned int >::iterator, bool>
                 ret = particle_n_hits.insert( std::make_pair(hitParticle.second, 1 ));
              if (!ret.second && ret.first != particle_n_hits.end()) {
@@ -743,9 +820,6 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           }
           else {
              ++missing_hit;
-          }
-          for (auto hitParticle : makeRange(hitParticlesMap.equal_range(hitIndex))) {
-             ++(particle_counts[hitParticle.second]);
           }
        }
 
