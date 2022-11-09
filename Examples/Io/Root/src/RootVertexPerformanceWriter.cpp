@@ -302,6 +302,7 @@ ActsExamples::ProcessCode ActsExamples::RootVertexPerformanceWriter::writeT(
 
     std::vector<int> contributingTruthVertices;
 
+    if (associatedTruthParticles.size() == trackParameters.size()) {
     for (const auto& trk : tracks) {
       Acts::BoundTrackParameters origTrack = *(trk.originalParams);
 
@@ -317,6 +318,7 @@ ActsExamples::ProcessCode ActsExamples::RootVertexPerformanceWriter::writeT(
         idx++;
       }
     }  // end loop tracks
+    }
 
     // Now find true vtx with most matching tracks at reco vtx
     // and check if it contributes more than 50 of all tracks
