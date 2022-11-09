@@ -797,6 +797,7 @@ def addCKFTracks(
             inputTrajectories=trackFinder.config.outputTrajectories,
             inputMeasurementParticlesMap="measurement_particles_map",
             trackingGeometry=trackingGeometry,
+            dumpDuplicates=False,
             **acts.examples.defaultKWArgs(
                 # The bottom seed could be the first, second or third hits on the truth track
                 nMeasurementsMin=CKFPerformanceConfigArg.nMeasurementsMin,
@@ -970,6 +971,7 @@ AmbiguityResolutionConfig = namedtuple(
 )
 def addAmbiguityResolution(
     s,
+    trackingGeometry: acts.TrackingGeometry,
     config: AmbiguityResolutionConfig = AmbiguityResolutionConfig(),
     ckfPerformanceConfigArg: CKFPerformanceConfig = CKFPerformanceConfig(),
     outputDirRoot: Optional[Union[Path, str]] = None,
@@ -1003,6 +1005,7 @@ def addAmbiguityResolution(
             inputParticles="truth_seeds_selected",
             inputTrajectories=alg.config.inputTrajectories,
             inputMeasurementParticlesMap="measurement_particles_map",
+            trackingGeometry=trackingGeometry,
             **acts.examples.defaultKWArgs(
                 nMeasurementsMin=ckfPerformanceConfigArg.nMeasurementsMin,
                 ptMin=ckfPerformanceConfigArg.ptMin,

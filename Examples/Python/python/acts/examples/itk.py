@@ -486,6 +486,7 @@ def itkSeedingAlgConfig(inputSpacePointsType):
         useVariableMiddleSPRange=useVariableMiddleSPRange,
         binSizeR=binSizeR,
         forceRadialSorting=forceRadialSorting,
+        # orthogonal
         seedConfirmation=seedConfirmation,
         centralSeedConfirmationRange=centralSeedConfirmationRange,
         forwardSeedConfirmationRange=forwardSeedConfirmationRange,

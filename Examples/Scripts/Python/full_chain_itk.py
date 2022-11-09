@@ -21,12 +21,15 @@ from acts.examples.reconstruction import (
     AmbiguityResolutionConfig,
     addVertexFitting,
     VertexFinder,
+    TrackSelectorRanges,
+    SeedingAlgorithm,
 )
 
 ttbar_pu200 = True
 u = acts.UnitConstants
 geo_dir = pathlib.Path("acts-itk")
 outputDir = pathlib.Path.cwd() / "itk_output"
+doAmbi = False
 # acts.examples.dump_args_calls(locals())  # show acts.examples python binding calls
 
 detector, trackingGeometry, decorators = acts.examples.itk.buildITkGeometry(geo_dir)
@@ -84,6 +87,8 @@ addSeeding(
     if ttbar_pu200
     else TruthSeedRanges(),
     *acts.examples.itk.itkSeedingAlgConfig("PixelSpacePoints"),
+#    seedingAlgorithm = SeedingAlgorithm.Orthogonal,
+    seedingAlgorithm = SeedingAlgorithm.Default,
     geoSelectionConfigFile=geo_dir / "itk-hgtd/geoSelection-ITk.json",
     outputDirRoot=outputDir,
 )
@@ -97,42 +102,44 @@ addCKFTracks(
     outputDirRoot=outputDir,
 )
 
-addAmbiguityResolution(
+if doAmbi :
+  addAmbiguityResolution(
     s,
+    trackingGeometry,
     AmbiguityResolutionConfig(maximumSharedHits=3),
     CKFPerformanceConfig(ptMin=1.0 * u.GeV if ttbar_pu200 else 0.0, nMeasurementsMin=6),
     outputDirRoot=outputDir,
-)
+   )
 
-addVertexFitting(
+  addVertexFitting(
     s,
     field,
     vertexFinder=VertexFinder.Iterative,
     outputDirRoot=outputDir,
-)
+   )
 
-ckfTrackParameters = "fittedTrackParameters"
+# ckfTrackParameters = "fittedTrackParameters"
 # #    ckfTrackParametersTips = "fittedTrackParametersTips"
-vtxTrackParameters = "vtxTrackParameters"
-trackSelector = TrackSelector(
-            level=acts.logging.INFO,
-            inputTrackParameters=ckfTrackParameters,
-            outputTrackParameters=vtxTrackParameters,
-            removeNeutral=True,
-            ptMin=500 * u.MeV,
-            absEtaMax=4.0,
-         )
-s.addAlgorithm(trackSelector)
+# vtxTrackParameters = "vtxTrackParameters"
+# trackSelector = TrackSelector(
+#            level=acts.logging.INFO,
+#            inputTrackParameters=ckfTrackParameters,
+#            outputTrackParameters=vtxTrackParameters,
+#            removeNeutral=True,
+#            ptMin=500 * u.MeV,
+#            absEtaMax=4.0,
+#         )
+#s.addAlgorithm(trackSelector)
 #        trackParameters = trackSelector.config.outputTrackParameters
 #
 # print('outputDirRoot=',outputDir)
-addVertexFitting(
-    s,
-    field,
-    vertexFinder=VertexFinder.Iterative,
-    outputDirRoot=outputDir,
-    trajectories=None,
-    trackParameters=vtxTrackParameters,
-)
-
+# addVertexFitting(
+#    s,
+#    field,
+#    vertexFinder=VertexFinder.Iterative,
+#    outputDirRoot=outputDir,
+#    trajectories=None,
+#    trackParameters=vtxTrackParameters,
+#)
+#
 s.run()
