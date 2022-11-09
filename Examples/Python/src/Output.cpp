@@ -336,7 +336,7 @@ void addOutput(Context& ctx) {
       fileMode, effPlotToolConfig, fakeRatePlotToolConfig,
       duplicationPlotToolConfig, trackSummaryPlotToolConfig, truthMatchProbMin,
       nMeasurementsMin, ptMin, trackingGeometry,
-      duplicatedPredictor);
+      duplicatedPredictor, dumpDuplicates);
 
   ACTS_PYTHON_DECLARE_WRITER(
       ActsExamples::RootNuclearInteractionParametersWriter, mex,
