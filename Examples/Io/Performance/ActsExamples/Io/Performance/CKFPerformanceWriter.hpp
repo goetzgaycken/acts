@@ -108,6 +108,7 @@ class CKFPerformanceWriter final : public WriterT<TrajectoriesContainer> {
   size_t m_nTotalDuplicateParticles = 0;
   size_t m_nTotalFakeParticles = 0;
   void dumpStat();
+  std::mutex m_mutex;
   std::vector<double> m_ptBins;
   std::vector<std::vector<Stat> > m_stat;
 };
