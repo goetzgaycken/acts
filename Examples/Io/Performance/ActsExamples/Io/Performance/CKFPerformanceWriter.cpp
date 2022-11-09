@@ -1293,6 +1293,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   }
 
   if (m_stat.empty()) {
+     std::lock_guard<std::mutex> stat_lock(m_mutex);
      m_stat.resize(stat_pt_bins.size());
      m_ptBins.clear();
      m_ptBins.reserve(stat_pt_bins.size());
@@ -1307,6 +1308,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
      }
   }
   else {
+     std::lock_guard<std::mutex> stat_lock(m_mutex);
      for (unsigned int pt_i=0; pt_i < stat.size(); ++pt_i) {
         for (unsigned int stat_i=0; stat_i < stat[pt_i].size(); ++stat_i) {
            m_stat.at(pt_i).at(stat_i) += stat.at(pt_i).at(stat_i);
