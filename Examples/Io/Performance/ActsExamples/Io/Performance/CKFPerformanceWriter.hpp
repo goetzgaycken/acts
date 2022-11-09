@@ -18,6 +18,8 @@
 #include "Acts/Geometry/TrackingGeometry.hpp"
 #include <mutex>
 
+#include "Stat.h"
+
 class TFile;
 class TTree;
 
@@ -61,6 +63,7 @@ class CKFPerformanceWriter final : public WriterT<TrajectoriesContainer> {
     std::shared_ptr<const Acts::TrackingGeometry> trackingGeometry;
      ///< The tracking geometry, a set pointer will cause the
      ///< geometry to be drawn
+     bool dumpDuplicates=false;
   };
 
   /// Construct from configuration and log level.
@@ -104,6 +107,9 @@ class CKFPerformanceWriter final : public WriterT<TrajectoriesContainer> {
   size_t m_nTotalMatchedParticles = 0;
   size_t m_nTotalDuplicateParticles = 0;
   size_t m_nTotalFakeParticles = 0;
+  void dumpStat();
+  std::vector<double> m_ptBins;
+  std::vector<std::vector<Stat> > m_stat;
 };
 
 }  // namespace ActsExamples

@@ -38,6 +38,25 @@
 #include <TTree.h>
 #include <TVectorF.h>
 
+namespace ActsExamples {
+   std::ostream &operator<<(std::ostream &out, const Stat &a ) {
+      out <<           std::setw(14) << a.min() << " < "
+          <<           std::setw(14) << a.mean()
+          << " +- " << std::setw(14) << a.rms()
+          << " < "  << std::setw(14) << a.max()
+          << " / "  << std::setw(9)  << a.n();
+      if (!a.bins().empty()) {
+         out << std::endl;
+         out << a.lowerEdge() << ", " << a.lowerEdge()+a.binWidth() << ".." << a.upperEdge() << ": ";
+         out << std::setw(5) << a.bins()[0] << " |";
+         for (unsigned int bin_i=1; bin_i<a.bins().size()-1; ++bin_i) {
+            out << " " << std::setw(5) << a.bins()[bin_i];
+         }
+         out << " | " << std::setw(5) << a.bins().back() ;
+      }
+      return out;
+   }
+}
 
 
 ActsExamples::CKFPerformanceWriter::CKFPerformanceWriter(
@@ -118,6 +137,8 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::endRun() {
       "Duplicate rate with particles (nDuplicateParticles/nTrueParticles) = "
       << duplicationRate_particle);
 
+  dumpStat();
+
   auto write_float = [&](float f, const char* name) {
     TVectorF v(1);
     v[0] = f;
@@ -149,72 +170,7 @@ public:
 };
 
 namespace {
-   inline double sqr(double a) { return a*a; }
-   class Stat {
-   public:
-      Stat() = default;
-      Stat(Stat &&) = default;
-      Stat(const Stat &) = default;
-      Stat(unsigned int nbins, double lower_edge, double upper_edge) {
-         setBinning(nbins, lower_edge, upper_edge);
-      }
-      void add(double val) {
-         m_n += 1.;
-         m_sum += val;
-         m_sum2 += val*val;
-         m_min=std::min(val,m_min);
-         m_max=std::max(val,m_max);
-         if (!m_bins.empty()) {fill(val); }
-      }
-      double mean() const { return m_n>0. ? m_sum/m_n : 0.; }
-      double rms()  const { return m_n>1. ? sqrt( (m_sum2 - m_sum*m_sum/m_n)/(m_n-1.)) : 0.; }
-      double n()    const { return m_n; }
-      double min()  const { return m_min; }
-      double max()  const { return m_max; }
-      double m_n   = 0.;
-      double m_sum = 0.;
-      double m_sum2 = 0.;
-      double m_min = std::numeric_limits<double>::max();
-      double m_max = -std::numeric_limits<double>::max();
-
-      void setBinning(unsigned int n_bins, double lower_edge, double upper_edge) {
-         m_bins.clear();
-         m_bins.resize(n_bins+2,0);
-         m_scale = n_bins / (upper_edge - lower_edge);
-         m_lowerEdge=lower_edge-binWidth();
-      }
-      unsigned int bin( double value) {
-         return value < m_lowerEdge ? 0 : std::min(m_bins.size()-1,
-                                                   static_cast<std::size_t>( (value - m_lowerEdge) * m_scale));
-      }
-      double lowerEdge() const { return m_lowerEdge + binWidth(); }
-      double upperEdge() const { return m_lowerEdge + (m_bins.size()-1)/m_scale; }
-      double binWidth()  const { return 1/m_scale; }
-      const std::vector<unsigned short> &bins() const { return m_bins; }
-      void fill(double value) {
-         ++m_bins.at(bin(value));
-      }
-      double m_lowerEdge;
-      double m_scale;
-      std::vector<unsigned short> m_bins;
-   };
-   std::ostream &operator<<(std::ostream &out, const Stat &a ) {
-      out <<           std::setw(14) << a.min() << " < "
-          <<           std::setw(14) << a.mean()
-          << " +- " << std::setw(14) << a.rms()
-          << " < "  << std::setw(14) << a.max()
-          << " / "  << std::setw(9)  << a.n();
-      if (!a.bins().empty()) {
-         out << std::endl;
-         out << a.lowerEdge() << ", " << a.lowerEdge()+a.binWidth() << ".." << a.upperEdge() << ": ";
-         out << std::setw(5) << a.bins()[0] << " |";
-         for (unsigned int bin_i=1; bin_i<a.bins().size()-1; ++bin_i) {
-            out << " " << std::setw(5) << a.bins()[bin_i];
-         }
-         out << " | " << std::setw(5) << a.bins().back() ;
-      }
-      return out;
-   }
+   using ActsExamples::sqr;
    enum EStat {
       kMeasPerTraj,
       kPartPerTraj,
@@ -246,6 +202,24 @@ namespace {
             "particles per hit",
             };
    }
+   template <class T1, class T2>
+   void dumpStatPtBins(const T1 &stat_pt_bins, const T2 &stat) {
+     static const std::array<const char *,kNStat> stat_names( statNames());
+     std::size_t max_length=0;
+     for (const char * a_name : stat_names) {
+        max_length=std::max(max_length, strlen(a_name));
+     }
+     for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
+        std::cout << "-- Statistics pt bin " << stat_pt_bins[pt_i] << " ... "<< std::endl;
+        for (unsigned int stat_i=0; stat_i<stat.at(pt_i).size(); ++stat_i ) {
+           std::cout << stat_names.at(stat_i) << std::setw( 31 - std::min(static_cast<std::size_t>(30),strlen(stat_names.at(stat_i))) )
+                     << " " << stat.at(pt_i).at(stat_i)
+                     << std::endl;
+        }
+        std::cout << std::endl;
+     }
+   }
+
 
    template <class T>
    double transverseMomentum(const T &param) {
@@ -318,7 +292,8 @@ namespace {
                        const std::map<unsigned int,Counter> &trajectory_counts,
                        const std::map<unsigned int,const Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::ConstTrackStateProxy> &hit_states,
                        std::vector<double> &pt_out,
-                       const unsigned int floats_per_column) {
+                       const unsigned int floats_per_column,
+                       bool really_dump_params) {
       std::vector<std::array<double,7> > trajectory_params;
       trajectory_params.reserve( trajectory_counts.size() );
       bool has_param=false;
@@ -351,7 +326,7 @@ namespace {
          }
          ++idx;
       }
-      if (has_param) {
+      if (has_param && really_dump_params) {
          dumpParameters(header, trajectory_params, floats_per_column);
       }
    }
@@ -427,6 +402,10 @@ namespace {
    }
 }
 
+void  ActsExamples::CKFPerformanceWriter::dumpStat() {
+  dumpStatPtBins( m_ptBins, m_stat);
+}
+
 ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
     const AlgorithmContext& ctx, const TrajectoriesContainer& trajectories) {
   using HitParticlesMap = IndexMultimap<ActsFatras::Barcode>;
@@ -460,7 +439,9 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   // Vector of input features for neural network classification
   std::vector<float> inputFeatures(3);
 
-  std::cout << "particles " << hitParticlesMap.size() << std::endl;
+  if (m_cfg.dumpDuplicates) {
+     std::cout << "particles " << hitParticlesMap.size() << std::endl;
+  }
   std::map<std::pair<size_t, size_t>, unsigned int >              trajectoryId;
   std::map<unsigned int, std::pair<size_t, size_t> >              trajectoryIdMap;
   std::map<ActsFatras::Barcode, unsigned int >                    shortParticleId;
@@ -602,6 +583,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                       dump_all=true;
                    }
 
+                   if (m_cfg.dumpDuplicates) {
                    std::cout << "DEBUG " 
                              << (cov(Acts::eBoundLoc1,Acts::eBoundLoc1)<1e-6 ? "suspicious loc1 cov in " : "" )
                              << " trajectory " << itraj << ", " << trackTip
@@ -619,6 +601,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                              << " cov filtered: " << std::endl << ( state.hasFiltered()   ?  state.filteredCovariance() : cov) << std::endl
                              << " cov smoothed: " << std::endl<< ( state.hasSmoothed()   ?  state.smoothedCovariance() : cov) << std::endl
                              << std::endl;
+                   }
                    }
                 }
                 double a_hit_chi2 = computeChi2ForHit(/*ctx.geoContext,*/
@@ -644,6 +627,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
              if (debug_counter++ < 1000) {
                 const auto &meas_calibrated = state.effectiveCalibrated();
                 const auto &calib_cov = state.effectiveCalibratedCovariance();
+                if (m_cfg.dumpDuplicates) {
                 std::cout << "DEBUG hit " << hitIndex << " measurement " <<  localPos
                           << "(" << meas_calibrated << ")"
                           <<  " fit " << Acts::Vector2(boundParams[Acts::eBoundLoc0], boundParams[Acts::eBoundLoc1])
@@ -656,13 +640,14 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                           << " /  " << ( insert_result.first != hit_chi2.at(traj_id).end() ? std::get<1>(insert_result.first->second) : static_cast<unsigned int>(0))
                           << " | " << n_measurements
                           << std::endl;
+                }
              }
              }
 
           }
           return true;
        });
-       if (visualize) {
+       if (visualize && m_cfg.dumpDuplicates) {
           Acts::ObjVisualization3D visualizer;
           Acts::EventDataView3D::drawMultiTrajectory(visualizer,  traj.multiTrajectory(), trackTip, ctx.geoContext);
           std::stringstream file_name;
@@ -824,6 +809,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
        }
 
        if (particle_counts.size()>1 || trajectory_counts.size()>1) {
+          if (m_cfg.dumpDuplicates) {
           std::cout << "trajectory " << std::setw(9) << itraj << " tip: " << std::setw(9) << trackTip
                     << " id " << traj_id
                     << std::endl;
@@ -1176,10 +1162,11 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                 offset_i = offset_end;
              }
           }
-
+          }
 
 
           // -- seed
+          if (m_cfg.dumpDuplicates) {
           std::vector<std::vector<Index> > seed_cluster_idx;
           for (unsigned int offset_i=0;offset_i<trajectory_counts.size();) {
              unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_counts.size()), offset_i+floats_per_col);
@@ -1231,9 +1218,10 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
              std::cout << std::endl;
           }
           std::cout << std::endl;
+          }
 
           // -- particles
-          {
+          if (m_cfg.dumpDuplicates) {
              std::cout << std::setw(4) << " ";
              for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
                 if (a_particle.second.counts()> 0) {
@@ -1272,7 +1260,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
              dumpParameters("PART", particle_param, floats_per_col);
           }
           // -- parameters
-          {
+          if (m_cfg.dumpDuplicates) {
              std::vector<double> traj_pt;
              dumpPerigeeParameters("ORIG", ctx, trajectory_counts, trajectoryIdMap, trajectories,traj_pt, floats_per_col);
           }
@@ -1284,7 +1272,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                 std::vector<double> traj_pt;
                 std::stringstream header;
                 header << hitIndex;
-                dumpParameters(header.str(), ctx,trajectory_counts, hit_state_iter->second, traj_pt, floats_per_col);
+                dumpParameters(header.str(), ctx,trajectory_counts, hit_state_iter->second, traj_pt, floats_per_col, m_cfg.dumpDuplicates);
                 unsigned idx=0;
                 for (const std::pair<const unsigned int,Counter> &trajectory : trajectory_counts) {
                    double a_traj_pt=traj_pt.at(idx);
@@ -1304,20 +1292,28 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
     }
   }
 
-  static const std::array<const char *,kNStat> stat_names( statNames());
-  std::size_t max_length=0;
-  for (const char * a_name : stat_names) {
-     max_length=std::max(max_length, strlen(a_name));
-  }
-  for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
-     std::cout << "-- Statistics pt bin " << stat_pt_bins[pt_i] << " ... "<< std::endl;
-     for (unsigned int stat_i=0; stat_i<stat.at(pt_i).size(); ++stat_i ) {
-        std::cout << stat_names.at(stat_i) << std::setw( 31 - std::min(static_cast<std::size_t>(30),strlen(stat_names.at(stat_i))) )
-                  << " " << stat.at(pt_i).at(stat_i)
-                  << std::endl;
+  if (m_stat.empty()) {
+     m_stat.resize(stat_pt_bins.size());
+     m_ptBins.clear();
+     m_ptBins.reserve(stat_pt_bins.size());
+     std::copy(stat_pt_bins.begin(),stat_pt_bins.end(),std::back_inserter(m_ptBins));
+     std::copy(stat.begin(), stat.end(), std::back_inserter(m_stat));
+     m_stat.resize(m_stat.size());
+     for (unsigned int pt_i=0; pt_i < stat.size(); ++pt_i) {
+        m_stat.at(pt_i).resize(stat[pt_i].size());
+        for (unsigned int stat_i=0; stat_i < stat[pt_i].size(); ++stat_i) {
+           m_stat.at(pt_i).at(stat_i) = stat.at(pt_i).at(stat_i);
+        }
      }
-     std::cout << std::endl;
   }
+  else {
+     for (unsigned int pt_i=0; pt_i < stat.size(); ++pt_i) {
+        for (unsigned int stat_i=0; stat_i < stat[pt_i].size(); ++stat_i) {
+           m_stat.at(pt_i).at(stat_i) += stat.at(pt_i).at(stat_i);
+        }
+     }
+  }
+  dumpStatPtBins( stat_pt_bins, stat);
 
   // Loop over all trajectories
   for (std::size_t iTraj = 0; iTraj < trajectories.size(); ++iTraj) {
