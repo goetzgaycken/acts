@@ -979,6 +979,7 @@ def addTrajectoryWriters(
                 inputTrajectories=trajectories,
                 inputMeasurementParticlesMap="measurement_particles_map",
                 trackingGeometry=trackingGeometry,
+                dumpDuplicates=False,
                 **acts.examples.defaultKWArgs(
                     # The bottom seed could be the first, second or third hits on the truth track
                     nMeasurementsMin=ckfPerformanceConfig.nMeasurementsMin,
@@ -1170,6 +1171,7 @@ def addExaTrkX(
 )
 def addAmbiguityResolution(
     s,
+    trackingGeometry: acts.TrackingGeometry,
     config: AmbiguityResolutionConfig = AmbiguityResolutionConfig(),
     selectedParticles: str = "truth_seeds_selected",
     ckfPerformanceConfig: CKFPerformanceConfig = CKFPerformanceConfig(),
