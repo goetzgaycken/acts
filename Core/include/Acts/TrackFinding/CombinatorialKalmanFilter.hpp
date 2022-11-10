@@ -161,6 +161,7 @@ struct CombinatorialKalmanFilterOptions {
       SourceLinkAccessor accessor_,
       CombinatorialKalmanFilterExtensions<traj_t> extensions_,
       LoggerWrapper logger_, const PropagatorPlainOptions& pOptions,
+      std::size_t max_measurement_index=0,
       const Surface* rSurface = nullptr, bool mScattering = true,
       bool eLoss = true, bool rSmoothing = true)
       : geoContext(gctx),
@@ -204,6 +205,8 @@ struct CombinatorialKalmanFilterOptions {
 
   /// Whether to run smoothing to get fitted parameter
   bool smoothing = true;
+
+  std::size_t maxMeasurementIndex = 0;
 
   /// Logger instance
   LoggerWrapper logger;
@@ -1229,6 +1232,12 @@ class CombinatorialKalmanFilter {
       return false;
     }
   };
+  template <typename T_Index, unsigned int N>
+  constexpr std::array<T_Index, N> initialTrajectoriesPerHit(T_Index def_val) {
+     std::array<T_Index, N> tmp;
+     std::fill(tmp.begin(),tmp.end(), def_val);
+     return tmp;
+  }
 
  public:
   /// Combinatorial Kalman Filter implementation, calls the Kalman filter
@@ -1253,9 +1262,11 @@ class CombinatorialKalmanFilter {
   /// parameters
   template <typename source_link_iterator_t,
             typename start_parameters_container_t,
+            typename seed_proto_tracks_t,
             typename parameters_t = BoundTrackParameters>
   std::vector<Result<CombinatorialKalmanFilterResult<traj_t>>> findTracks(
       const start_parameters_container_t& initialParameters,
+      const seed_proto_tracks_t &protoTracks,
       const CombinatorialKalmanFilterOptions<source_link_iterator_t, traj_t>&
           tfOptions,
       std::shared_ptr<traj_t> trajectory = {}) const {
@@ -1303,8 +1314,39 @@ class CombinatorialKalmanFilter {
       trajectory = std::make_shared<traj_t>();
     }
     auto stateBuffer = std::make_shared<traj_t>();
-
+    const std::array<unsigned short, 10> initial_trajectories_per_hit{};
+    
+    std::vector< std::array<unsigned short, 10> > trajectories_per_hit;
+    trajectories_per_hit.resize(tfOptions.maxMeasurementIndex, initialTrajectoriesPerHit<unsigned short, 10>(std::numeric_limits<unsigned short>::max()));
+    unsigned short traj_id=1;
     for (size_t iseed = 0; iseed < initialParameters.size(); ++iseed) {
+
+      unsigned int n_traj=0;
+      std::array<unsigned short,10> shared_traj;
+      for (const auto &hitIndex : protoTracks[iseed]) {
+         if (n_traj==0) {
+            for (auto a_traj_id : trajectories_per_hit.at(hitIndex) ) {
+               if (n_traj>=shared_traj.size()) {
+                  break;
+               }
+               shared_traj[n_traj++]=a_traj_i;
+            }
+         }
+         else {
+            // remove all trjectories of the list of trajectories which do not contain this seed hit;
+            for (unsigned int a_traj_i=0; a_traj_i < n_traj; ++a_traj_i) {
+               auto traj_iter = std::lower_bound(trajectories_per_hit.at(hitIndex).begin(),trajectories_per_hit.at(hitIndex).end(),shard_traj[traj_i]);
+               if (traj_ier == trajectories_per_hit.at(hitIndex).end()) {
+                  --n_traj;
+                  for (;a_traj_i < n_traj; ++a_traj_i) {
+                     shared_traj[a_traj_i]=shared_traj[a_traj_i+1];
+                  }
+                  break;
+               }
+            }
+         }
+      }
+
       const auto& sParameters = initialParameters[iseed];
 
       typename propagator_t::template action_list_t_result_t<
@@ -1330,6 +1372,7 @@ class CombinatorialKalmanFilter {
         ckfResults.emplace_back(result.error());
         continue;
       }
+      
 
       auto& propRes = *result;
 
@@ -1358,6 +1401,50 @@ class CombinatorialKalmanFilter {
         // Emplace back the failed result
         ckfResults.emplace_back(combKalmanResult.result.error());
         continue;
+      }
+
+      // mark all hits of the trajectory 
+      unsigned int errors=0;
+      unsigned int max_counter=0;
+      for (auto trackTip : combKalmanResult.value().lastTrackIndices) {
+         bool has_measurements=false;
+         combKalmanResult.value().fittedStates.multiTrajectory().visitBackwards(trackTip, [&trajectories_per_hit,
+                                                                                           &error,
+                                                                                           &max_counter,
+                                                                                           traj_id](const auto& state) {
+            // no truth info with non-measurement state
+            if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
+               return true;
+            }
+
+            // register all particles that generated this hit
+            const auto& sl = static_cast<const IndexSourceLink&>(state.uncalibrated());
+            auto hitIndex = sl.index();
+            if (hitIndex>=trajectories_per_hit.size()) {
+               // 
+               trajectories_per_hit.resize(hitIndex+1);
+               auto &hit_trajectories = trajectories_per_hit.at(hitIndex);
+               
+               auto insert_iter = std::lower_bound(hit_trajectories.begin(),hit_trajectories.end(),traj_i);
+               auto dest_iter=hit_trajectories.begin();
+               unsigned int counter=0;
+               for (auto &elm : hit_trajectories) {
+                  if (elm>traj_id) {
+                     elm = traj_id;
+                     break;
+                  }
+                  ++counter;
+               }
+               max_counter=std::max(max_counter,counter);
+               if (hit_trajectories.beck() != std::numeric_limits<unsigned short>::max()) {
+                  ++errors;
+               }
+            }
+            has_measurements=true;
+         });
+         if (has_measurements) {
+            ++traj_id;
+         }
       }
 
       // Emplace back the successful result
