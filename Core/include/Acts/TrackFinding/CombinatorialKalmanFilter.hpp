@@ -171,6 +171,7 @@ struct CombinatorialKalmanFilterOptions {
         extensions(std::move(extensions_)),
         propagatorPlainOptions(pOptions),
         referenceSurface(rSurface),
+        maxMeasurementIndex(max_measurement_index),
         multipleScattering(mScattering),
         energyLoss(eLoss),
         smoothing(rSmoothing),
@@ -197,6 +198,8 @@ struct CombinatorialKalmanFilterOptions {
   /// The reference Surface
   const Surface* referenceSurface = nullptr;
 
+  std::size_t maxMeasurementIndex = 0;
+
   /// Whether to consider multiple scattering.
   bool multipleScattering = true;
 
@@ -205,8 +208,6 @@ struct CombinatorialKalmanFilterOptions {
 
   /// Whether to run smoothing to get fitted parameter
   bool smoothing = true;
-
-  std::size_t maxMeasurementIndex = 0;
 
   /// Logger instance
   LoggerWrapper logger;
@@ -1240,6 +1241,12 @@ class CombinatorialKalmanFilter {
   }
 
  public:
+  enum class SeedError {
+      // ensure all values are non-zero
+      SeedHitsAlreadyOnTrajectory = 1,
+  };
+
+
   /// Combinatorial Kalman Filter implementation, calls the Kalman filter
   /// and smoother
   ///
@@ -1283,6 +1290,10 @@ class CombinatorialKalmanFilter {
     using Actors = ActionList<CombinatorialKalmanFilterActor>;
     using Aborters = AbortList<CombinatorialKalmanFilterAborter>;
 
+    using TrajectoryIDType = unsigned short;
+
+    constexpr unsigned int NTrajectoriesPerHit = 16;
+
     // Create relevant options for the propagation options
     PropagatorOptions<Actors, Aborters> propOptions(
         tfOptions.geoContext, tfOptions.magFieldContext, tfOptions.logger);
@@ -1314,29 +1325,39 @@ class CombinatorialKalmanFilter {
       trajectory = std::make_shared<traj_t>();
     }
     auto stateBuffer = std::make_shared<traj_t>();
-    const std::array<unsigned short, 10> initial_trajectories_per_hit{};
-    
-    std::vector< std::array<unsigned short, 10> > trajectories_per_hit;
-    trajectories_per_hit.resize(tfOptions.maxMeasurementIndex, initialTrajectoriesPerHit<unsigned short, 10>(std::numeric_limits<unsigned short>::max()));
+
+    std::vector< std::array<TrajectoryIDType, NTrajectoriesPerHit> > trajectories_per_hit;
+    trajectories_per_hit.resize(tfOptions.maxMeasurementIndex,
+                                initialTrajectoriesPerHit<TrajectoryIDType,
+                                                          NTrajectoriesPerHit>(std::numeric_limits<TrajectoryIDType>::max()));
+    // for the time being start trajectory IDs at 1 to better identify wrong initialisation.
+    // invalid IDs would be zero and std::numeric_limits<TrajectoryIDType>::max()
     unsigned short traj_id=1;
     for (size_t iseed = 0; iseed < initialParameters.size(); ++iseed) {
 
+      // check whether there are trajectories which contain all hits of
+      // the current seed.
       unsigned int n_traj=0;
-      std::array<unsigned short,10> shared_traj;
+      std::array<unsigned short,NTrajectoriesPerHit> shared_traj;
       for (const auto &hitIndex : protoTracks[iseed]) {
          if (n_traj==0) {
             for (auto a_traj_id : trajectories_per_hit.at(hitIndex) ) {
+               if (a_traj_id == std::numeric_limits<TrajectoryIDType>::max()) break;
                if (n_traj>=shared_traj.size()) {
                   break;
                }
-               shared_traj[n_traj++]=a_traj_i;
+               shared_traj[n_traj++]=a_traj_id;
             }
          }
          else {
-            // remove all trjectories of the list of trajectories which do not contain this seed hit;
+            // remove all trjectories from the list which do not contain this seed hit;
             for (unsigned int a_traj_i=0; a_traj_i < n_traj; ++a_traj_i) {
-               auto traj_iter = std::lower_bound(trajectories_per_hit.at(hitIndex).begin(),trajectories_per_hit.at(hitIndex).end(),shard_traj[traj_i]);
-               if (traj_ier == trajectories_per_hit.at(hitIndex).end()) {
+               // @TODO for the likely small number of trajectories per hit, lineare search
+               //       is likely faster. lower_bound is just used for convenience.
+               auto traj_iter = std::lower_bound(trajectories_per_hit.at(hitIndex).begin(),
+                                                 trajectories_per_hit.at(hitIndex).end(),
+                                                 shared_traj[a_traj_i]);
+               if (traj_iter == trajectories_per_hit.at(hitIndex).end()) {
                   --n_traj;
                   for (;a_traj_i < n_traj; ++a_traj_i) {
                      shared_traj[a_traj_i]=shared_traj[a_traj_i+1];
@@ -1346,7 +1367,9 @@ class CombinatorialKalmanFilter {
             }
          }
       }
-
+      if (n_traj>0)  {
+         ckfResults.emplace_back(Result<void>::failure(SeedError::SeedHitsAlreadyOnTrajectory));
+      }
       const auto& sParameters = initialParameters[iseed];
 
       typename propagator_t::template action_list_t_result_t<
@@ -1372,7 +1395,6 @@ class CombinatorialKalmanFilter {
         ckfResults.emplace_back(result.error());
         continue;
       }
-      
 
       auto& propRes = *result;
 
@@ -1403,42 +1425,42 @@ class CombinatorialKalmanFilter {
         continue;
       }
 
-      // mark all hits of the trajectory 
+      // mark all hits of the trajectory as being used
       unsigned int errors=0;
       unsigned int max_counter=0;
       for (auto trackTip : combKalmanResult.value().lastTrackIndices) {
          bool has_measurements=false;
          combKalmanResult.value().fittedStates.multiTrajectory().visitBackwards(trackTip, [&trajectories_per_hit,
-                                                                                           &error,
+                                                                                           &errors,
                                                                                            &max_counter,
-                                                                                           traj_id](const auto& state) {
+                                                                                           traj_id,
+                                                                                           &has_measurements](const auto& state) {
             // no truth info with non-measurement state
             if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
                return true;
             }
 
             // register all particles that generated this hit
-            const auto& sl = static_cast<const IndexSourceLink&>(state.uncalibrated());
+            const auto& sl = static_cast<const ActsExamples::IndexSourceLink&>(state.uncalibrated());
             auto hitIndex = sl.index();
             if (hitIndex>=trajectories_per_hit.size()) {
-               // 
                trajectories_per_hit.resize(hitIndex+1);
-               auto &hit_trajectories = trajectories_per_hit.at(hitIndex);
-               
-               auto insert_iter = std::lower_bound(hit_trajectories.begin(),hit_trajectories.end(),traj_i);
-               auto dest_iter=hit_trajectories.begin();
-               unsigned int counter=0;
-               for (auto &elm : hit_trajectories) {
-                  if (elm>traj_id) {
-                     elm = traj_id;
-                     break;
-                  }
-                  ++counter;
+            }
+            auto &hit_trajectories = trajectories_per_hit.at(hitIndex);
+
+            // trajectories are added in increasing order, thus once the elment value
+            // is larger than the ID of the current trajectory, an unused element is reached.
+            unsigned int counter=0;
+            for (auto &elm : hit_trajectories) {
+               if (elm>traj_id) {
+                  elm = traj_id;
+                  break;
                }
-               max_counter=std::max(max_counter,counter);
-               if (hit_trajectories.beck() != std::numeric_limits<unsigned short>::max()) {
-                  ++errors;
-               }
+               ++counter;
+            }
+            max_counter=std::max(max_counter,counter);
+            if (hit_trajectories.beck() != std::numeric_limits<unsigned short>::max()) {
+               ++errors;
             }
             has_measurements=true;
          });

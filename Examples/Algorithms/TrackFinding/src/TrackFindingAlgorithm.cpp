@@ -51,6 +51,8 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
       ctx.eventStore.get<IndexSourceLinkContainer>(m_cfg.inputSourceLinks);
   const auto& initialParameters = ctx.eventStore.get<TrackParametersContainer>(
       m_cfg.inputInitialTrackParameters);
+  const auto& protoTracks =
+      ctx.eventStore.get<ProtoTrackContainer>("extended_proto_tracks");
 
   // Prepare the output data with MultiTrajectory
   TrajectoriesContainer trajectories;
@@ -100,7 +102,7 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
                                           << " seeds.");
 
   auto mtj = std::make_shared<Acts::VectorMultiTrajectory>();
-  auto results = (*m_cfg.findTracks)(initialParameters, options, mtj);
+  auto results = (*m_cfg.findTracks)(initialParameters, protoTracks, options, mtj);
 
   // Compute shared hits from all the reconstructed tracks
   if (m_cfg.computeSharedHits) {
