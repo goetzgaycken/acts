@@ -14,6 +14,7 @@
 #include "Acts/TrackFitting/GainMatrixSmoother.hpp"
 #include "Acts/TrackFitting/GainMatrixUpdater.hpp"
 #include "ActsExamples/TrackFinding/TrackFindingAlgorithm.hpp"
+#include "ActsExamples/TrackFinding/SeedFilter.hpp"
 #include "ActsExamples/EventData/IndexSourceLink.hpp"
 
 #include <random>
@@ -38,10 +39,10 @@ struct TrackFinderFunctionImpl
 
   ActsExamples::TrackFindingAlgorithm::TrackFinderResult operator()(
       const ActsExamples::TrackParametersContainer& initialParameters,
-      const ActsExamples::ProtoTrackContainer&      seedProtoTracks,
+      SeedFilter&      seed_filter,
       const ActsExamples::TrackFindingAlgorithm::TrackFinderOptions& options,
       std::shared_ptr<Acts::VectorMultiTrajectory> trajectory) const override {
-    return trackFinder.findTracks(initialParameters, seedProtoTracks, options,
+    return trackFinder.findTracks(initialParameters, seed_filter, options,
                                   std::move(trajectory));
   };
 };

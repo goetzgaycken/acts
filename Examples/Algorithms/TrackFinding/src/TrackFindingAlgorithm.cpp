@@ -7,6 +7,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/TrackFinding/TrackFindingAlgorithm.hpp"
+#include "ActsExamples/TrackFinding/SeedFilter.hpp"
 
 #include "Acts/EventData/VectorMultiTrajectory.hpp"
 #include "Acts/Surfaces/PerigeeSurface.hpp"
@@ -92,17 +93,18 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
       slAccessorDelegate;
   slAccessorDelegate.connect<&IndexSourceLinkAccessor::range>(&slAccessor);
 
+  SeedFilter seed_filter(protoTracks,  measurements.size() );
   // Set the CombinatorialKalmanFilter options
   ActsExamples::TrackFindingAlgorithm::TrackFinderOptions options(
       ctx.geoContext, ctx.magFieldContext, ctx.calibContext, slAccessorDelegate,
-      extensions, Acts::LoggerWrapper{logger()}, pOptions, measurements.size(), &(*pSurface));
+      extensions, Acts::LoggerWrapper{logger()}, pOptions, &(*pSurface));
 
   // Perform the track finding for all initial parameters
   ACTS_DEBUG("Invoke track finding with " << initialParameters.size()
                                           << " seeds.");
 
   auto mtj = std::make_shared<Acts::VectorMultiTrajectory>();
-  auto results = (*m_cfg.findTracks)(initialParameters, protoTracks, options, mtj);
+  auto results = (*m_cfg.findTracks)(initialParameters, seed_filter, options, mtj);
 
   // Compute shared hits from all the reconstructed tracks
   if (m_cfg.computeSharedHits) {

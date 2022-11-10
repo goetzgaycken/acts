@@ -161,7 +161,6 @@ struct CombinatorialKalmanFilterOptions {
       SourceLinkAccessor accessor_,
       CombinatorialKalmanFilterExtensions<traj_t> extensions_,
       LoggerWrapper logger_, const PropagatorPlainOptions& pOptions,
-      std::size_t max_measurement_index=0,
       const Surface* rSurface = nullptr, bool mScattering = true,
       bool eLoss = true, bool rSmoothing = true)
       : geoContext(gctx),
@@ -171,7 +170,6 @@ struct CombinatorialKalmanFilterOptions {
         extensions(std::move(extensions_)),
         propagatorPlainOptions(pOptions),
         referenceSurface(rSurface),
-        maxMeasurementIndex(max_measurement_index),
         multipleScattering(mScattering),
         energyLoss(eLoss),
         smoothing(rSmoothing),
@@ -197,8 +195,6 @@ struct CombinatorialKalmanFilterOptions {
 
   /// The reference Surface
   const Surface* referenceSurface = nullptr;
-
-  std::size_t maxMeasurementIndex = 0;
 
   /// Whether to consider multiple scattering.
   bool multipleScattering = true;
@@ -1233,12 +1229,6 @@ class CombinatorialKalmanFilter {
       return false;
     }
   };
-  template <typename T_Index, unsigned int N>
-  constexpr std::array<T_Index, N> initialTrajectoriesPerHit(T_Index def_val) {
-     std::array<T_Index, N> tmp;
-     std::fill(tmp.begin(),tmp.end(), def_val);
-     return tmp;
-  }
 
  public:
   enum class SeedError {
@@ -1269,11 +1259,11 @@ class CombinatorialKalmanFilter {
   /// parameters
   template <typename source_link_iterator_t,
             typename start_parameters_container_t,
-            typename seed_proto_tracks_t,
+            typename seed_filter_t,
             typename parameters_t = BoundTrackParameters>
   std::vector<Result<CombinatorialKalmanFilterResult<traj_t>>> findTracks(
       const start_parameters_container_t& initialParameters,
-      const seed_proto_tracks_t &protoTracks,
+      const seed_filter_t &seed_filter,
       const CombinatorialKalmanFilterOptions<source_link_iterator_t, traj_t>&
           tfOptions,
       std::shared_ptr<traj_t> trajectory = {}) const {
@@ -1290,9 +1280,7 @@ class CombinatorialKalmanFilter {
     using Actors = ActionList<CombinatorialKalmanFilterActor>;
     using Aborters = AbortList<CombinatorialKalmanFilterAborter>;
 
-    using TrajectoryIDType = unsigned short;
 
-    constexpr unsigned int NTrajectoriesPerHit = 16;
 
     // Create relevant options for the propagation options
     PropagatorOptions<Actors, Aborters> propOptions(
@@ -1326,48 +1314,14 @@ class CombinatorialKalmanFilter {
     }
     auto stateBuffer = std::make_shared<traj_t>();
 
-    std::vector< std::array<TrajectoryIDType, NTrajectoriesPerHit> > trajectories_per_hit;
-    trajectories_per_hit.resize(tfOptions.maxMeasurementIndex,
-                                initialTrajectoriesPerHit<TrajectoryIDType,
-                                                          NTrajectoriesPerHit>(std::numeric_limits<TrajectoryIDType>::max()));
     // for the time being start trajectory IDs at 1 to better identify wrong initialisation.
     // invalid IDs would be zero and std::numeric_limits<TrajectoryIDType>::max()
-    unsigned short traj_id=1;
+    typename seed_filter_t::TrajectoryIDType traj_id=1;
     for (size_t iseed = 0; iseed < initialParameters.size(); ++iseed) {
 
       // check whether there are trajectories which contain all hits of
       // the current seed.
-      unsigned int n_traj=0;
-      std::array<unsigned short,NTrajectoriesPerHit> shared_traj;
-      for (const auto &hitIndex : protoTracks[iseed]) {
-         if (n_traj==0) {
-            for (auto a_traj_id : trajectories_per_hit.at(hitIndex) ) {
-               if (a_traj_id == std::numeric_limits<TrajectoryIDType>::max()) break;
-               if (n_traj>=shared_traj.size()) {
-                  break;
-               }
-               shared_traj[n_traj++]=a_traj_id;
-            }
-         }
-         else {
-            // remove all trjectories from the list which do not contain this seed hit;
-            for (unsigned int a_traj_i=0; a_traj_i < n_traj; ++a_traj_i) {
-               // @TODO for the likely small number of trajectories per hit, lineare search
-               //       is likely faster. lower_bound is just used for convenience.
-               auto traj_iter = std::lower_bound(trajectories_per_hit.at(hitIndex).begin(),
-                                                 trajectories_per_hit.at(hitIndex).end(),
-                                                 shared_traj[a_traj_i]);
-               if (traj_iter == trajectories_per_hit.at(hitIndex).end()) {
-                  --n_traj;
-                  for (;a_traj_i < n_traj; ++a_traj_i) {
-                     shared_traj[a_traj_i]=shared_traj[a_traj_i+1];
-                  }
-                  break;
-               }
-            }
-         }
-      }
-      if (n_traj>0)  {
+      if (seed_filter.filterSeed(iseed)) {
          ckfResults.emplace_back(Result<void>::failure(SeedError::SeedHitsAlreadyOnTrajectory));
       }
       const auto& sParameters = initialParameters[iseed];
@@ -1426,48 +1380,9 @@ class CombinatorialKalmanFilter {
       }
 
       // mark all hits of the trajectory as being used
-      unsigned int errors=0;
-      unsigned int max_counter=0;
-      for (auto trackTip : combKalmanResult.value().lastTrackIndices) {
-         bool has_measurements=false;
-         combKalmanResult.value().fittedStates.multiTrajectory().visitBackwards(trackTip, [&trajectories_per_hit,
-                                                                                           &errors,
-                                                                                           &max_counter,
-                                                                                           traj_id,
-                                                                                           &has_measurements](const auto& state) {
-            // no truth info with non-measurement state
-            if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
-               return true;
-            }
-
-            // register all particles that generated this hit
-            const auto& sl = static_cast<const ActsExamples::IndexSourceLink&>(state.uncalibrated());
-            auto hitIndex = sl.index();
-            if (hitIndex>=trajectories_per_hit.size()) {
-               trajectories_per_hit.resize(hitIndex+1);
-            }
-            auto &hit_trajectories = trajectories_per_hit.at(hitIndex);
-
-            // trajectories are added in increasing order, thus once the elment value
-            // is larger than the ID of the current trajectory, an unused element is reached.
-            unsigned int counter=0;
-            for (auto &elm : hit_trajectories) {
-               if (elm>traj_id) {
-                  elm = traj_id;
-                  break;
-               }
-               ++counter;
-            }
-            max_counter=std::max(max_counter,counter);
-            if (hit_trajectories.beck() != std::numeric_limits<unsigned short>::max()) {
-               ++errors;
-            }
-            has_measurements=true;
-         });
-         if (has_measurements) {
-            ++traj_id;
-         }
-      }
+      traj_id = seed_filter.update(traj_id,
+                                   combKalmanResult.value().fittedStates.multiTrajectory(),
+                                   combKalmanResult.value().lastTrackIndices);
 
       // Emplace back the successful result
       ckfResults.emplace_back(std::move(combKalmanResult));
