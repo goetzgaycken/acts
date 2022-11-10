@@ -1,3 +1,5 @@
+# add_definitions(-g -O0)
+
 configure_file(
   ActsVersion.hpp.in
   ${CMAKE_CURRENT_BINARY_DIR}/Acts/ActsVersion.hpp)

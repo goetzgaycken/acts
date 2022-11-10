@@ -7,6 +7,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/TrackFinding/TrackFindingAlgorithm.hpp"
+#include "ActsExamples/TrackFinding/SeedFilter.hpp"
 
 #include "Acts/EventData/MultiTrajectory.hpp"
 #include "Acts/EventData/VectorMultiTrajectory.hpp"
@@ -53,6 +54,8 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
       ctx.eventStore.get<IndexSourceLinkContainer>(m_cfg.inputSourceLinks);
   const auto& initialParameters = ctx.eventStore.get<TrackParametersContainer>(
       m_cfg.inputInitialTrackParameters);
+  const auto& protoTracks =
+      ctx.eventStore.get<ProtoTrackContainer>("extended_proto_tracks");
 
   // Prepare the output data with MultiTrajectory
   // @TODO: Refactor to remove Trajectories
@@ -93,6 +96,7 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
       slAccessorDelegate;
   slAccessorDelegate.connect<&IndexSourceLinkAccessor::range>(&slAccessor);
 
+  SeedFilter seed_filter(protoTracks,  measurements.size() );
   // Set the CombinatorialKalmanFilter options
   ActsExamples::TrackFindingAlgorithm::TrackFinderOptions options(
       ctx.geoContext, ctx.magFieldContext, ctx.calibContext, slAccessorDelegate,
@@ -107,7 +111,16 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
   auto tracks =
       std::make_unique<TrackContainer>(trackContainer, trackStateContainer);
 
+  SeedFilter::TrajectoryIDType traj_id=1;
   for (std::size_t iseed = 0; iseed < initialParameters.size(); ++iseed) {
+    bool marked_as_filtered_out=false;
+    if (seed_filter.filterSeed(iseed)) {
+      //marked_as_filtered_out=true;
+       //      ckfResults.emplace_back(result.error());
+      trajectories.push_back(Trajectories());
+      seedIdx.push_back(iseed);
+      continue;
+    }
     auto result =
         (*m_cfg.findTracks)(initialParameters.at(iseed), options, *tracks);
     m_nTotalSeeds++;
@@ -136,10 +149,18 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
                                     track.parameters(), track.covariance()}});
     }
 
+
     // Create a Trajectories result struct
     trajectories.emplace_back(trackStateContainer, std::move(tips),
-                              std::move(parameters));
+                              std::move(parameters),
+                              marked_as_filtered_out);
     seedIdx.push_back(iseed);
+    // mark all hits of the trajectory as being used
+    if (not marked_as_filtered_out) {
+         traj_id = seed_filter.update(traj_id,
+                                      trajectories.back().multiTrajectory(),
+                                      trajectories.back().tips());
+    }
   }
 
   // Compute shared hits from all the reconstructed tracks
