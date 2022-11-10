@@ -26,6 +26,7 @@
 #include <tbb/combinable.h>
 
 namespace ActsExamples {
+class SeedFilter;
 
 class TrackFindingAlgorithm final : public BareAlgorithm {
  public:
@@ -45,6 +46,7 @@ class TrackFindingAlgorithm final : public BareAlgorithm {
     virtual ~TrackFinderFunction() = default;
     virtual TrackFinderResult operator()(
         const TrackParametersContainer&, const TrackFinderOptions&,
+        SeedFilter&      seed_filter,
         std::shared_ptr<Acts::VectorMultiTrajectory>) const = 0;
   };
 

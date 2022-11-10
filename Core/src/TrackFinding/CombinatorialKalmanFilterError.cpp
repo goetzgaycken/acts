@@ -33,6 +33,9 @@ class CombinatorialKalmanFilterErrorCategory : public std::error_category {
       case CombinatorialKalmanFilterError::PropagationReachesMaxSteps:
         return "Propagation reaches max steps before track finding is "
                "finished";
+      case CombinatorialKalmanFilterError::SeedHitsAlreadyOnTrajectory:
+        return "Seed rejected because Hits of seed already part of a "
+               "trajectory";
       default:
         return "unknown";
     }

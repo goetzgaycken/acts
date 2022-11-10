@@ -5,12 +5,11 @@
 #include "ActsExamples/EventData/IndexSourceLink.hpp"
 #include "ActsExamples/EventData/ProtoTrack.hpp"
 
-namespace ActsExample {
-
+namespace ActsExamples {
 class SeedFilter {
 public:
-   TrajectoryIDType = using unsigned short;
-   constexpr unsigned int NTrajectoriesPerHit = 16;
+   using TrajectoryIDType = unsigned short;
+   constexpr static unsigned int NTrajectoriesPerHit = 16;
 
    template <typename T_Index, unsigned int N>
    constexpr std::array<T_Index, N> initialTrajectoriesPerHit(T_Index def_val) {
@@ -20,9 +19,9 @@ public:
    }
 
 
-   SeedFilter(const ProtoTrackContainer &proto_track,
+   SeedFilter(const ActsExamples::ProtoTrackContainer &proto_tracks,
               std::size_t maxMeasurementIndex)
-      : protoTrack(proto_track)
+      : protoTracks(proto_tracks)
    {
       trajectories_per_hit.resize(maxMeasurementIndex,
                                   initialTrajectoriesPerHit<TrajectoryIDType,
@@ -68,7 +67,7 @@ public:
       // mark all hits of the trajectory as being used
       for (auto trackTip : tips) {
          bool has_measurements=false;
-         multi_trajectory.visitBackwards(trackTip, [&this,
+         multi_trajectory.visitBackwards(trackTip, [this,
                                                     traj_id,
                                                     &has_measurements](const auto& state) {
             // no truth info with non-measurement state
@@ -79,7 +78,7 @@ public:
             // register all particles that generated this hit
             const auto& sl = static_cast<const ActsExamples::IndexSourceLink&>(state.uncalibrated());
             auto hitIndex = sl.index();
-            if (hitIndex>=trajectories_per_hit.size()) {
+            if (hitIndex>=this->trajectories_per_hit.size()) {
                this->trajectories_per_hit.resize(hitIndex+1);
             }
             auto &hit_trajectories = this->trajectories_per_hit.at(hitIndex);
@@ -95,12 +94,13 @@ public:
                ++counter;
             }
             this->max_counter=std::max(this->max_counter,counter);
-            if (hit_trajectories.beck() != std::numeric_limits<unsigned short>::max()) {
+            if (hit_trajectories.back() != std::numeric_limits<unsigned short>::max()) {
                ++this->n_errors;
             }
             has_measurements=true;
+            return true;
          });
-         
+
          if (has_measurements) {
             ++traj_id;
          }
@@ -108,7 +108,7 @@ public:
       return traj_id;
    }
 
-   const ProtoTrackContainer &protoTrack;
+   const ActsExamples::ProtoTrackContainer &protoTracks;
    std::vector< std::array<TrajectoryIDType, NTrajectoriesPerHit> > trajectories_per_hit;
    unsigned int n_errors = 0;
    unsigned int max_counter=0;

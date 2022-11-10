@@ -19,6 +19,7 @@ enum class CombinatorialKalmanFilterError {
   OutputConversionFailed,
   MeasurementSelectionFailed,
   PropagationReachesMaxSteps,
+  SeedHitsAlreadyOnTrajectory,
 };
 
 std::error_code make_error_code(Acts::CombinatorialKalmanFilterError e);

@@ -39,10 +39,11 @@ struct TrackFinderFunctionImpl
 
   ActsExamples::TrackFindingAlgorithm::TrackFinderResult operator()(
       const ActsExamples::TrackParametersContainer& initialParameters,
-      SeedFilter&      seed_filter,
       const ActsExamples::TrackFindingAlgorithm::TrackFinderOptions& options,
+      ActsExamples::SeedFilter&      seed_filter,
       std::shared_ptr<Acts::VectorMultiTrajectory> trajectory) const override {
-    return trackFinder.findTracks(initialParameters, seed_filter, options,
+    return trackFinder.findTracks(initialParameters, options,
+                                  seed_filter,
                                   std::move(trajectory));
   };
 };

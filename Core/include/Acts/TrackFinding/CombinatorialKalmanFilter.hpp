@@ -259,6 +259,24 @@ struct CombinatorialKalmanFilterResult {
   AbortList<PathLimitReached, EndOfWorldReached, ParticleStopped> abortList;
 };
 
+/// "concept" for a seed filter
+/// The seed filter allows to filter seeds using information from previously
+/// found trajectories.
+template <typename traj_t>
+class SeedPassThroughFilter {
+public:
+   using TrajectoryIDType = std::size_t;
+
+   bool filterSeed([[maybe_unused]] std::size_t iseed) { return false; }
+   /// update the seed filter using the information from the latest trajectory
+   /// @return the next trajector ID, where a unique id is only assigned to trajectories with e.g. measurements
+   TrajectoryIDType update(TrajectoryIDType traj_id,
+                           [[maybe_unused]] const traj_t &multi_trajectory,
+                           const std::vector<Acts::MultiTrajectoryTraits::IndexType> &tips) {
+      return traj_id + tips.size();
+   }
+};
+
 /// Combinatorial Kalman filter to find tracks.
 ///
 ///
@@ -1231,11 +1249,6 @@ class CombinatorialKalmanFilter {
   };
 
  public:
-  enum class SeedError {
-      // ensure all values are non-zero
-      SeedHitsAlreadyOnTrajectory = 1,
-  };
-
 
   /// Combinatorial Kalman Filter implementation, calls the Kalman filter
   /// and smoother
@@ -1259,13 +1272,25 @@ class CombinatorialKalmanFilter {
   /// parameters
   template <typename source_link_iterator_t,
             typename start_parameters_container_t,
-            typename seed_filter_t,
-            typename parameters_t = BoundTrackParameters>
+            typename parameters_t = BoundTrackParameters,
+            typename seed_filter_t = SeedPassThroughFilter<traj_t> >
   std::vector<Result<CombinatorialKalmanFilterResult<traj_t>>> findTracks(
       const start_parameters_container_t& initialParameters,
-      const seed_filter_t &seed_filter,
       const CombinatorialKalmanFilterOptions<source_link_iterator_t, traj_t>&
           tfOptions,
+      std::shared_ptr<traj_t> trajectory = {}) const {
+     SeedPassThroughFilter<traj_t> seed_filter;
+     return findTracks(initialParameters,tfOptions,seed_filter, std::move(trajectory));
+  }
+  template <typename source_link_iterator_t,
+            typename start_parameters_container_t,
+            typename parameters_t = BoundTrackParameters,
+            typename seed_filter_t = SeedPassThroughFilter<traj_t> >
+  std::vector<Result<CombinatorialKalmanFilterResult<traj_t>>> findTracks(
+      const start_parameters_container_t& initialParameters,
+      const CombinatorialKalmanFilterOptions<source_link_iterator_t, traj_t>&
+          tfOptions,
+      seed_filter_t &seed_filter,
       std::shared_ptr<traj_t> trajectory = {}) const {
     const auto& logger = tfOptions.logger;
 
@@ -1322,7 +1347,8 @@ class CombinatorialKalmanFilter {
       // check whether there are trajectories which contain all hits of
       // the current seed.
       if (seed_filter.filterSeed(iseed)) {
-         ckfResults.emplace_back(Result<void>::failure(SeedError::SeedHitsAlreadyOnTrajectory));
+         auto result = Result<void>(CombinatorialKalmanFilterError::SeedHitsAlreadyOnTrajectory);
+         ckfResults.emplace_back(result.error());
       }
       const auto& sParameters = initialParameters[iseed];
 
@@ -1381,8 +1407,8 @@ class CombinatorialKalmanFilter {
 
       // mark all hits of the trajectory as being used
       traj_id = seed_filter.update(traj_id,
-                                   combKalmanResult.value().fittedStates.multiTrajectory(),
-                                   combKalmanResult.value().lastTrackIndices);
+                                   *combKalmanResult.fittedStates,
+                                   combKalmanResult.lastTrackIndices);
 
       // Emplace back the successful result
       ckfResults.emplace_back(std::move(combKalmanResult));
