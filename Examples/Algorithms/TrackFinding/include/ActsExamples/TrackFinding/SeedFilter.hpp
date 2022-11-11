@@ -30,6 +30,7 @@ public:
 
    bool filterSeed(std::size_t iseed) {
       unsigned int n_traj=0;
+      last_seed=iseed;
       std::array<unsigned short,NTrajectoriesPerHit> shared_traj;
       for (const auto &hitIndex : protoTracks[iseed]) {
          if (n_traj==0) {
@@ -40,6 +41,7 @@ public:
                }
                shared_traj[n_traj++]=a_traj_id;
             }
+            if (n_traj==0) return false;
          }
          else {
             // remove all trjectories from the list which do not contain this seed hit;
@@ -60,9 +62,23 @@ public:
             }
          }
       }
+      if (n_traj>0) {
+         std::cout << "DEBUG SeedFilter seed " <<  iseed << " (future traj id: " << last_traj <<  ")" << " filtered out because its hits are on " << n_traj << " trajectories :";
+         for (unsigned int i=0; i<n_traj; ++i) {
+            std::cout << " " << shared_traj[i];
+         }
+         for (const auto &hitIndex : protoTracks[iseed]) {
+            std::cout << ", " << hitIndex << " :" ;
+            for(auto a_traj_id : trajectories_per_hit.at(hitIndex) ) {
+               if (a_traj_id == std::numeric_limits<TrajectoryIDType>::max()) break;
+               std::cout <<  " " << a_traj_id;
+            }
+         }
+         std::cout << std::endl;
+      }
       return  n_traj>0;
    }
-   bool update(TrajectoryIDType traj_id,
+   TrajectoryIDType update(TrajectoryIDType traj_id,
                const Acts::MultiTrajectory<Acts::VectorMultiTrajectory> &multi_trajectory,
                const std::vector<Acts::MultiTrajectoryTraits::IndexType> &tips) {
       // mark all hits of the trajectory as being used
@@ -103,9 +119,12 @@ public:
          });
 
          if (has_measurements) {
+            std::cout << "DEBUG SeedFilter register new trajectory " <<  traj_id << " for seed " << last_seed << std::endl;
             ++traj_id;
          }
       }
+      last_seed=std::numeric_limits<unsigned int>::max();
+      last_traj=traj_id;
       return traj_id;
    }
 
@@ -113,5 +132,7 @@ public:
    std::vector< std::array<TrajectoryIDType, NTrajectoriesPerHit> > trajectories_per_hit;
    unsigned int n_errors = 0;
    unsigned int max_counter=0;
+   unsigned int last_traj=0;
+   unsigned int last_seed=std::numeric_limits<unsigned int>::max();
 };
 }
