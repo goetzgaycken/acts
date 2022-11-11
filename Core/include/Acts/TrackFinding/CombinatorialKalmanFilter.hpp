@@ -1349,6 +1349,7 @@ class CombinatorialKalmanFilter {
       if (seed_filter.filterSeed(iseed)) {
          auto result = Result<void>(CombinatorialKalmanFilterError::SeedHitsAlreadyOnTrajectory);
          ckfResults.emplace_back(result.error());
+         continue;
       }
       const auto& sParameters = initialParameters[iseed];
 

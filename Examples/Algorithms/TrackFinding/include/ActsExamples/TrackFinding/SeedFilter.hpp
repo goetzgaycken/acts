@@ -51,6 +51,7 @@ public:
                                                  shared_traj[a_traj_i]);
                if (traj_iter == trajectories_per_hit.at(hitIndex).end()) {
                   --n_traj;
+                  if (n_traj==0) return false;
                   for (;a_traj_i < n_traj; ++a_traj_i) {
                      shared_traj[a_traj_i]=shared_traj[a_traj_i+1];
                   }
@@ -62,8 +63,8 @@ public:
       return  n_traj>0;
    }
    bool update(TrajectoryIDType traj_id,
-               Acts::MultiTrajectory<Acts::VectorMultiTrajectory> &multi_trajectory,
-               std::vector<Acts::MultiTrajectoryTraits::IndexType> &tips) {
+               const Acts::MultiTrajectory<Acts::VectorMultiTrajectory> &multi_trajectory,
+               const std::vector<Acts::MultiTrajectoryTraits::IndexType> &tips) {
       // mark all hits of the trajectory as being used
       for (auto trackTip : tips) {
          bool has_measurements=false;
@@ -87,11 +88,11 @@ public:
             // is larger than the ID of the current trajectory, an unused element is reached.
             unsigned int counter=0;
             for (auto &elm : hit_trajectories) {
+               ++counter;
                if (elm>traj_id) {
                   elm = traj_id;
                   break;
                }
-               ++counter;
             }
             this->max_counter=std::max(this->max_counter,counter);
             if (hit_trajectories.back() != std::numeric_limits<unsigned short>::max()) {
