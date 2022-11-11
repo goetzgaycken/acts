@@ -253,6 +253,9 @@ struct CombinatorialKalmanFilterResult {
   // Indicator if track finding has been done
   bool finished = false;
 
+  void setFiltered() { isFilteredOut=true; }
+  bool isFilteredOut = false;
+
   Result<void> result{Result<void>::success()};
 
   // TODO place into options and make them accessible?
@@ -1346,7 +1349,9 @@ class CombinatorialKalmanFilter {
 
       // check whether there are trajectories which contain all hits of
       // the current seed.
+      bool marked_as_filtered_out=false;
       if (seed_filter.filterSeed(iseed)) {
+         //marked_as_filtered_out=true;
          auto result = Result<void>(CombinatorialKalmanFilterError::SeedHitsAlreadyOnTrajectory);
          ckfResults.emplace_back(result.error());
          continue;
@@ -1407,9 +1412,14 @@ class CombinatorialKalmanFilter {
       }
 
       // mark all hits of the trajectory as being used
-      traj_id = seed_filter.update(traj_id,
-                                   *combKalmanResult.fittedStates,
-                                   combKalmanResult.lastTrackIndices);
+      if (not marked_as_filtered_out) {
+         traj_id = seed_filter.update(traj_id,
+                                      *combKalmanResult.fittedStates,
+                                      combKalmanResult.lastTrackIndices);
+      }
+      else {
+         combKalmanResult.setFiltered();
+      }
 
       // Emplace back the successful result
       ckfResults.emplace_back(std::move(combKalmanResult));

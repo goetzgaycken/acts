@@ -122,7 +122,9 @@ ActsExamples::ProcessCode ActsExamples::TrackFindingAlgorithm::execute(
       // Create a Trajectories result struct
       trajectories.emplace_back(trackFindingOutput.fittedStates,
                                 trackFindingOutput.lastMeasurementIndices,
-                                trackFindingOutput.fittedParameters);
+                                trackFindingOutput.fittedParameters,
+                                trackFindingOutput.isFilteredOut
+                                );
       seedIdx.push_back(iseed);
     } else {
       ACTS_WARNING("Track finding failed for seed " << iseed << " with error"

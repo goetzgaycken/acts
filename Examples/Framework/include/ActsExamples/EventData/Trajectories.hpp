@@ -45,10 +45,13 @@ struct Trajectories final {
   /// @param parameters Fitted track parameters indexed by trajectory index
   Trajectories(std::shared_ptr<MultiTrajectory> multiTraj,
                const std::vector<Acts::MultiTrajectoryTraits::IndexType>& tTips,
-               const IndexedParameters& parameters)
+               const IndexedParameters& parameters,
+               bool is_filtered=false)
       : m_multiTrajectory(std::move(multiTraj)),
         m_trackTips(tTips),
-        m_trackParameters(parameters) {}
+        m_trackParameters(parameters),
+        m_isFiltered(is_filtered)
+   {}
 
   /// Return true if there exists no valid trajectory.
   bool empty() const { return m_trackTips.empty(); }
@@ -97,6 +100,7 @@ struct Trajectories final {
     }
     return it->second;
   }
+  bool isFiltered() const { return m_isFiltered; }
 
  private:
   // The multiTrajectory
@@ -105,6 +109,7 @@ struct Trajectories final {
   std::vector<Acts::MultiTrajectoryTraits::IndexType> m_trackTips = {};
   // The fitted parameters at the provided surface for individual trajectories
   IndexedParameters m_trackParameters = {};
+  bool m_isFiltered = false;
 };
 
 /// Container for multiple trajectories.
