@@ -400,6 +400,133 @@ namespace {
          std::cout << std::endl;
       }
    }
+
+   void dumpHitQuality(const std::string &header,
+                       const std::map<unsigned int,Counter>                           &trajectory_counts,
+                       ActsFatras::Barcode                                             barcode,
+                       std::map<ActsFatras::Barcode, Counter >                         hitsPerParticle,
+                       std::map<unsigned int, std::map<ActsFatras::Barcode, Counter> > trajectoryBarcodeMap,
+                       const unsigned int floats_per_column)
+   {
+      static std::array<std::string, 5> quality_names{
+         "truth","reco","matched",
+         "eff.", "purity"};
+      std::vector<std::array<double,    quality_names.size()> > quality; // hit efficiency, purity
+      quality.reserve( trajectory_counts.size() );
+      for (const std::pair<const unsigned int,Counter> &trajectory : trajectory_counts) {
+         std::map<ActsFatras::Barcode, Counter>::const_iterator iter = hitsPerParticle.find(barcode);
+         unsigned int ref =  (iter  != hitsPerParticle.end() ? iter->second.counts() : 0 );
+         unsigned int reco=0;
+         double eff= 0.;
+         double purity=0;
+         if (trajectory.second.counts() > 0) {
+            std::map<unsigned int, std::map<ActsFatras::Barcode, Counter> >::const_iterator
+               traj_iter = trajectoryBarcodeMap.find(trajectory.first);
+            if (traj_iter != trajectoryBarcodeMap.end()) {
+               std::map<ActsFatras::Barcode, Counter>::const_iterator part_iter = traj_iter->second.find(barcode);
+               reco = (part_iter != traj_iter->second.end() ? part_iter->second.counts() : 0);
+               eff = (ref > 0 ? reco / (1.*ref)  : 0.);
+               purity = (part_iter != traj_iter->second.end() ? part_iter->second.counts() / (1.*trajectory.second.counts()) : 0.);
+            }
+         }
+         quality.emplace_back(std::array<double,quality_names.size()>{
+                  1.*ref,
+                  1.*trajectory.second.counts(),
+                  1.*reco,
+                  eff,
+                  purity});
+      }
+      for (unsigned int offset_i=0;offset_i<quality.size();) {
+         unsigned int traj_end  = std::min(static_cast<unsigned int>(quality.size()), offset_i+floats_per_column);
+         for (unsigned int param_i=0; param_i<quality_names.size(); ++param_i) {
+            if (param_i==0 && offset_i==0) {
+               std::cout << std::setw(4) << header << ") ";
+            }
+            else {
+               std::cout << std::setw(4) << " " << "  ";
+            }
+            std::cout << std::setw(7) << quality_names.at(param_i) << " ";
+            for (unsigned int traj_i=offset_i; traj_i<traj_end;++traj_i) {
+               const std::array<double, quality_names.size()> &param = quality[traj_i];
+               if (std::abs(param[1])>0.) {
+                  std::cout << std::setw(14) << param[param_i];
+               }
+               else {
+                  std::cout << std::setw(14) << " ";
+               }
+            }
+            std::cout << std::endl;
+         }
+         offset_i = traj_end;
+         std::cout << std::endl;
+      }
+   }
+
+   void dumpQuality(const std::string &header,
+                    const std::map<unsigned int,Counter> &trajectory_counts,
+                    const std::map<unsigned int, std::pair<size_t, size_t> > &trajectoryIdMap,
+                    const ActsExamples::TrajectoriesContainer& trajectories,
+                    const unsigned int floats_per_column) {
+      static std::array<std::string,3 > quality_names{"filt.", "chi2","ndf"};
+      std::vector<std::array<double,quality_names.size()> > quality; // filtered, chi2, ndf
+      quality.reserve( trajectory_counts.size() );
+      unsigned idx=0;
+      for (const std::pair<const unsigned int,Counter> &trajectory : trajectory_counts) {
+
+
+         std::map<unsigned int, std::pair<size_t, size_t> >::const_iterator traj_iter = trajectoryIdMap.find(trajectory.first);
+         if (traj_iter != trajectoryIdMap.end()) {
+            const auto& traj = trajectories[traj_iter->second.first];
+            size_t trackTip = traj_iter->second.second;
+            double chi2=0;
+            unsigned int ndof=0;
+            traj.multiTrajectory().visitBackwards(trackTip, [&](const auto& state) {
+                  // no truth info with non-measurement state
+                  if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
+                     return true;
+                  }
+                  chi2+=state.chi2();
+                  ++ndof;
+                  return true;
+               });
+            quality.emplace_back(std::array<double,quality_names.size()>{
+                  (traj.isFiltered() ? 0. : 1. ),
+                  ndof > 0 ? chi2 / ndof : chi2,
+                  1.*ndof});
+         }
+         else {
+            quality.emplace_back(std::array<double,quality_names.size()>{});
+         }
+         ++idx;
+      }
+
+      for (unsigned int offset_i=0;offset_i<quality.size();) {
+         unsigned int traj_end  = std::min(static_cast<unsigned int>(quality.size()), offset_i+floats_per_column);
+         for (unsigned int param_i=0; param_i<quality_names.size(); ++param_i) {
+            if (param_i==0 && offset_i==0) {
+               std::cout << std::setw(4) << header << ") ";
+            }
+            else {
+               std::cout << std::setw(4) << " " << "  ";
+            }
+            std::cout << std::setw(7) << quality_names.at(param_i) << " ";
+            for (unsigned int traj_i=offset_i; traj_i<traj_end;++traj_i) {
+               const std::array<double, quality_names.size()> &param = quality[traj_i];
+               if (std::abs(param[1])>0) {
+                  std::cout << std::setw(14) << param[param_i];
+               }
+               else {
+                  std::cout << std::setw(14) << " ";
+               }
+            }
+            std::cout << std::endl;
+         }
+         offset_i = traj_end;
+         std::cout << std::endl;
+      }
+
+   }
+
 }
 
 void  ActsExamples::CKFPerformanceWriter::dumpStat() {
@@ -447,6 +574,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   std::map<ActsFatras::Barcode, unsigned int >                    shortParticleId;
   std::map<ActsFatras::Barcode, size_t >                          barcodeToParticle;
   std::map<ActsFatras::Barcode, std::map<unsigned int, Counter> > trajectoriesPerParticle;
+  std::map<ActsFatras::Barcode, Counter >                         hitsPerParticle;
   std::map<Index, std::set< unsigned int > >                      hitTrajectoryMap;
   std::map<unsigned int, std::vector<Index> >                     trajectoryToHits;
   std::map<unsigned int, std::map<ActsFatras::Barcode, Counter> > trajectoryBarcodeMap;
@@ -498,6 +626,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
               ++hit_share_count[pt_i];
            }
         }
+        ++hitsPerParticle[hitParticle.second];
      }
      for (unsigned int pt_i=0; pt_i < hit_share_count.size(); ++pt_i) {
         stat[pt_i]   [kNParticles].add( hit_share_count[pt_i] );
@@ -842,14 +971,24 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                     << std::setw(14) << " " << " ";
 
           for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
-             std::map<ActsFatras::Barcode, unsigned int >::const_iterator
-                particle_iter = shortParticleId.find( a_particle.first );
-             if (particle_iter != shortParticleId.end()) {
-                 std::cout << std::setw(16) << particle_iter->second;
+             std::stringstream msg;
+             {
+                std::map<ActsFatras::Barcode, unsigned int >::const_iterator
+                   particle_iter = shortParticleId.find( a_particle.first );
+
+                if (particle_iter != shortParticleId.end()) {
+                   msg << particle_iter->second;
+                }
              }
-             else {
-                std::cout << std::setw(16) << " ";
+             {
+                std::map<ActsFatras::Barcode, Counter >::const_iterator
+                   particle_iter = hitsPerParticle.find( a_particle.first );
+                if (particle_iter != hitsPerParticle.end()) {
+                   msg << "(" << particle_iter->second.counts() << ")";
+                }
              }
+
+             std::cout << std::setw(16) << msg.str();
           }
           std::cout << " | ";
           for (const std::pair<const unsigned int,Counter> a_trajectory : trajectory_counts) {
@@ -1258,6 +1397,16 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                 }
              }
              dumpParameters("PART", particle_param, floats_per_col);
+          }
+
+          // -- chi2, ndf, hit_efficiency, purity
+          if (m_cfg.dumpDuplicates) {
+             dumpQuality("Qual.",trajectory_counts, trajectoryIdMap, trajectories,floats_per_col);
+             for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
+                std::cout << a_particle.first  << ")" << std::endl;
+                dumpHitQuality("", trajectory_counts, a_particle.first, hitsPerParticle, trajectoryBarcodeMap,
+                               floats_per_col);
+             }
           }
           // -- parameters
           if (m_cfg.dumpDuplicates) {
