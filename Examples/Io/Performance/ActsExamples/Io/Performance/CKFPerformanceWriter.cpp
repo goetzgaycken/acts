@@ -371,13 +371,14 @@ namespace {
       }
    }
 
-   void dumpParameters(const std::string &header,
-                       const std::vector<std::array<double,7> > &trajectory_params,
-                       unsigned int floats_per_column) {
-      static std::array<std::string,7> param_names{"phi","theta","r","z","phi","theta","(+-)pt"};
+   template <std::size_t N>
+   void dumpArray(const std::string &header,
+                  const std::vector<std::array<double,N> > &trajectory_params,
+                  const std::array<std::string,N> &param_names,
+                  unsigned int floats_per_column) {
       for (unsigned int offset_i=0;offset_i<trajectory_params.size();) {
          unsigned int traj_end  = std::min(static_cast<unsigned int>(trajectory_params.size()), offset_i+floats_per_column);
-         for (unsigned int param_i=0; param_i<7; ++param_i) {
+         for (unsigned int param_i=0; param_i<param_names.size(); ++param_i) {
             if (param_i==0 && offset_i==0) {
                std::cout << std::setw(4) << header << ") ";
             }
@@ -386,7 +387,7 @@ namespace {
             }
             std::cout << std::setw(7) << param_names.at(param_i) << " ";
             for (unsigned int traj_i=offset_i; traj_i<traj_end;++traj_i) {
-               const std::array<double, 7> &param = trajectory_params[traj_i];
+               const std::array<double, N> &param = trajectory_params[traj_i];
                if (std::abs(param[5])>0) {
                   std::cout << std::setw(14) << param[param_i];
                }
@@ -401,13 +402,30 @@ namespace {
       }
    }
 
+   void dumpParameters(const std::string &header,
+                       const std::vector<std::array<double,7> > &trajectory_params,
+                       unsigned int floats_per_column) {
+      static std::array<std::string,7> param_names{"phi","theta","r","z","phi","theta","(+-)pt"};
+      dumpArray(header,trajectory_params,param_names, floats_per_column);
+   }
+
+   void dumpSeeds(const std::string &header,
+                       const std::vector<std::array<double,9> > &trajectory_params,
+                       unsigned int floats_per_column) {
+      static std::array<std::string,9> param_names{"phi","theta","r","z","phi","theta","(+-)pt","p","dR"};
+      dumpArray(header,trajectory_params,param_names, floats_per_column);
+   }
+
    void dumpSeeds(const std::string &header,
                   const ActsExamples::AlgorithmContext& ctx,
+                  const Acts::TrackingGeometry &tracking_geometry,
                   const std::map<unsigned int,Counter> &trajectory_counts,
                   const std::map<unsigned int, unsigned int> &trajToSeed,
                   const ActsExamples::TrackParametersContainer &seed_params,
+                  const ActsExamples::ProtoTrackContainer &protoTracks,
+                  const ActsExamples::MeasurementContainer &measurements,
                   const unsigned int floats_per_column) {
-      std::vector<std::array<double,7> > trajectory_params;
+      std::vector<std::array<double,9> > trajectory_params;
       trajectory_params.reserve( trajectory_counts.size() );
       bool has_param=false;
       unsigned idx=0;
@@ -415,28 +433,46 @@ namespace {
 
          std::map<unsigned int, unsigned int>::const_iterator seed_idx_iter = trajToSeed.find(trajectory.first);
          if (seed_idx_iter != trajToSeed.end() && seed_idx_iter->second < seed_params.size()) {
+            double delta_r=-1.;
+            std::map< unsigned int, unsigned int>::const_iterator
+               iter = trajToSeed.find(trajectory.first);
+            if (iter != trajToSeed.end()) {
+               if (iter->second < protoTracks.size()) {
+                  double min_r=std::numeric_limits<double>::max();
+                  double max_r=0.;
+                  for (const auto &seed_hit_idx : protoTracks[iter->second]) {
+                     Acts::Vector3 pos( globalCoords(tracking_geometry, ctx.geoContext,measurements.at(seed_hit_idx)) );
+                     double hit_r = Acts::VectorHelpers::perp(pos);
+                     min_r=std::min(min_r, hit_r);
+                     max_r=std::max(max_r, hit_r);
+                  }
+                  delta_r = (min_r < max_r ? max_r - min_r : delta_r);
+               }
+            }
 
             const auto& parameters = seed_params.at(seed_idx_iter->second);
             const auto& momentum = parameters.momentum();
             Acts::Vector3 position(parameters.position(ctx.geoContext));
-            trajectory_params.emplace_back(std::array<double,7>{ Acts::VectorHelpers::phi(position),
+            trajectory_params.emplace_back(std::array<double,9>{Acts::VectorHelpers::phi(position),
                                                                 Acts::VectorHelpers::theta(position),
                                                                 Acts::VectorHelpers::perp(position),
                                                                 position[Acts::ePos2],
                                                                 Acts::VectorHelpers::phi(momentum),
                                                                 Acts::VectorHelpers::theta(momentum),
                                                                 std::copysign ( Acts::VectorHelpers::perp(momentum)/Acts::UnitConstants::GeV,
-                                                                                parameters.charge())
+                                                                                parameters.charge()),
+                     parameters.absoluteMomentum(),
+                     delta_r
                });
             has_param=true;
          }
          else {
-            trajectory_params.emplace_back(std::array<double,7>{});
+            trajectory_params.emplace_back(std::array<double,9>{});
          }
          ++idx;
       }
       if (has_param) {
-         dumpParameters(header, trajectory_params, floats_per_column);
+         dumpSeeds(header, trajectory_params, floats_per_column);
       }
    }
 
@@ -448,9 +484,9 @@ namespace {
                        std::map<unsigned int, std::map<ActsFatras::Barcode, Counter> > trajectoryBarcodeMap,
                        const unsigned int floats_per_column)
    {
-      static std::array<std::string, 5> quality_names{
+      static std::array<std::string, 6> quality_names{
          "truth","reco","matched",
-         "eff.", "purity"};
+            "eff.", "purity", "eff*pu"};
       std::vector<std::array<double,    quality_names.size()> > quality; // hit efficiency, purity
       quality.reserve( trajectory_counts.size() );
       for (const std::pair<const unsigned int,Counter> &trajectory : trajectory_counts) {
@@ -474,32 +510,10 @@ namespace {
                   1.*trajectory.second.counts(),
                   1.*reco,
                   eff,
-                  purity});
+                  purity,
+                  eff*purity});
       }
-      for (unsigned int offset_i=0;offset_i<quality.size();) {
-         unsigned int traj_end  = std::min(static_cast<unsigned int>(quality.size()), offset_i+floats_per_column);
-         for (unsigned int param_i=0; param_i<quality_names.size(); ++param_i) {
-            if (param_i==0 && offset_i==0) {
-               std::cout << std::setw(4) << header << ") ";
-            }
-            else {
-               std::cout << std::setw(4) << " " << "  ";
-            }
-            std::cout << std::setw(7) << quality_names.at(param_i) << " ";
-            for (unsigned int traj_i=offset_i; traj_i<traj_end;++traj_i) {
-               const std::array<double, quality_names.size()> &param = quality[traj_i];
-               if (std::abs(param[1])>0.) {
-                  std::cout << std::setw(14) << param[param_i];
-               }
-               else {
-                  std::cout << std::setw(14) << " ";
-               }
-            }
-            std::cout << std::endl;
-         }
-         offset_i = traj_end;
-         std::cout << std::endl;
-      }
+      dumpArray(header,quality, quality_names,floats_per_column);
    }
 
    void dumpQuality(const std::string &header,
@@ -521,30 +535,43 @@ namespace {
          if (traj_iter != trajectoryIdMap.end()) {
             const auto& traj = trajectories[traj_iter->second.first];
             size_t trackTip = traj_iter->second.second;
+            std::map<unsigned int, unsigned int>::const_iterator seed_idx_iter = trajToSeed.find(trajectory.first);
+            const Acts::Surface *ref_surface=nullptr;
+            if (seed_idx_iter != trajToSeed.end() && seed_idx_iter->second < seed_params.size()) {
+                ref_surface= &seed_params.at(seed_idx_iter->second).referenceSurface();
+            }
+
             double chi2=0;
             unsigned int ndof=0;
-            traj.multiTrajectory().visitBackwards(trackTip, [&](const auto& state) {
+            
+            Acts::MultiTrajectory<Acts::VectorMultiTrajectory>::IndexType ref_state_idx= traj.multiTrajectory().size();
+            traj.multiTrajectory().visitBackwards(trackTip, [&chi2,&ndof, &ref_surface, &ref_state_idx](const auto& state) {
                   // no truth info with non-measurement state
                   if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
                      return true;
+                  }
+                  if (ref_surface && &(state.referenceSurface()) == ref_surface) {
+                     ref_state_idx = state.index();
                   }
                   chi2+=state.chi2();
                   ++ndof;
                   return true;
                });
+            ndof -= 3;
 
 
             double param_chi2=0.;
-            const auto& fittedParameters = traj.trackParameters(traj_iter->second.second);
-            if (fittedParameters.covariance()) {
-               const auto &cov = fittedParameters.covariance().value();
-               std::map<unsigned int, unsigned int>::const_iterator seed_idx_iter = trajToSeed.find(trajectory.first);
+            if (ref_state_idx < traj.multiTrajectory().size()) {
+               const auto ref_state = traj.multiTrajectory().getTrackState(ref_state_idx);
+               const auto& fittedParameters = ref_state.parameters();
+               //            if (ref.covariance()) {
+               const auto &cov = ref_state.covariance();
                if (seed_idx_iter != trajToSeed.end() && seed_idx_iter->second < seed_params.size()) {
                   const auto& seed_parameters = seed_params.at(seed_idx_iter->second);
                   std::array<unsigned int,3> check_params{Acts::eBoundPhi,Acts::eBoundTheta,Acts::eBoundQOverP};
                   for (unsigned int check_i=0; check_i<check_params.size();++check_i) {
                      unsigned int param_i = check_params[check_i];
-                     param_chi2 += sqr(  fittedParameters.parameters()[param_i]
+                     param_chi2 += sqr(  fittedParameters[param_i]
                                          - seed_parameters.parameters()[param_i] )/cov(param_i,param_i);
                   }
                }
@@ -562,31 +589,7 @@ namespace {
          ++idx;
       }
 
-      for (unsigned int offset_i=0;offset_i<quality.size();) {
-         unsigned int traj_end  = std::min(static_cast<unsigned int>(quality.size()), offset_i+floats_per_column);
-         for (unsigned int param_i=0; param_i<quality_names.size(); ++param_i) {
-            if (param_i==0 && offset_i==0) {
-               std::cout << std::setw(4) << header << ") ";
-            }
-            else {
-               std::cout << std::setw(4) << " " << "  ";
-            }
-            std::cout << std::setw(7) << quality_names.at(param_i) << " ";
-            for (unsigned int traj_i=offset_i; traj_i<traj_end;++traj_i) {
-               const std::array<double, quality_names.size()> &param = quality[traj_i];
-               if (std::abs(param[1])>0) {
-                  std::cout << std::setw(14) << param[param_i];
-               }
-               else {
-                  std::cout << std::setw(14) << " ";
-               }
-            }
-            std::cout << std::endl;
-         }
-         offset_i = traj_end;
-         std::cout << std::endl;
-      }
-
+      dumpArray(header, quality,quality_names, floats_per_column);
    }
 
 }
@@ -651,7 +654,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
         1.  * Acts::UnitConstants::GeV,
         2.5 * Acts::UnitConstants::GeV,
         5   * Acts::UnitConstants::GeV};
-  constexpr unsigned int floats_per_col =10;
+  constexpr unsigned int floats_per_col =16;
   std::array<std::vector<Stat>,stat_pt_bins.size() > stat;
   for (std::vector<Stat> &a_stat : stat ) {
      std::vector<Stat> tmp{
@@ -1474,7 +1477,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           }
           // -- parameters
           if (m_cfg.dumpDuplicates) {
-             dumpSeeds("SEED", ctx, trajectory_counts, trajToSeed, initialParameters, floats_per_col);
+             dumpSeeds("SEED", ctx, *(m_cfg.trackingGeometry), trajectory_counts, trajToSeed, initialParameters, protoTracks, measurements, floats_per_col);
 
              std::vector<double> traj_pt;
              dumpPerigeeParameters("ORIG", ctx, trajectory_counts, trajectoryIdMap, trajectories,traj_pt, floats_per_col);
