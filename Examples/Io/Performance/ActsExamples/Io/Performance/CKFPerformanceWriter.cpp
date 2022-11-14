@@ -401,6 +401,46 @@ namespace {
       }
    }
 
+   void dumpSeeds(const std::string &header,
+                  const ActsExamples::AlgorithmContext& ctx,
+                  const std::map<unsigned int,Counter> &trajectory_counts,
+                  const std::map<unsigned int, unsigned int> &trajToSeed,
+                  const ActsExamples::TrackParametersContainer &seed_params,
+                  const unsigned int floats_per_column) {
+      std::vector<std::array<double,7> > trajectory_params;
+      trajectory_params.reserve( trajectory_counts.size() );
+      bool has_param=false;
+      unsigned idx=0;
+      for (const std::pair<const unsigned int,Counter> &trajectory : trajectory_counts) {
+
+         std::map<unsigned int, unsigned int>::const_iterator seed_idx_iter = trajToSeed.find(trajectory.first);
+         if (seed_idx_iter != trajToSeed.end() && seed_idx_iter->second < seed_params.size()) {
+
+            const auto& parameters = seed_params.at(seed_idx_iter->second);
+            const auto& momentum = parameters.momentum();
+            Acts::Vector3 position(parameters.position(ctx.geoContext));
+            trajectory_params.emplace_back(std::array<double,7>{ Acts::VectorHelpers::phi(position),
+                                                                Acts::VectorHelpers::theta(position),
+                                                                Acts::VectorHelpers::perp(position),
+                                                                position[Acts::ePos2],
+                                                                Acts::VectorHelpers::phi(momentum),
+                                                                Acts::VectorHelpers::theta(momentum),
+                                                                std::copysign ( Acts::VectorHelpers::perp(momentum)/Acts::UnitConstants::GeV,
+                                                                                parameters.charge())
+               });
+            has_param=true;
+         }
+         else {
+            trajectory_params.emplace_back(std::array<double,7>{});
+         }
+         ++idx;
+      }
+      if (has_param) {
+         dumpParameters(header, trajectory_params, floats_per_column);
+      }
+   }
+
+
    void dumpHitQuality(const std::string &header,
                        const std::map<unsigned int,Counter>                           &trajectory_counts,
                        ActsFatras::Barcode                                             barcode,
@@ -463,11 +503,14 @@ namespace {
    }
 
    void dumpQuality(const std::string &header,
+                    const ActsExamples::AlgorithmContext& ctx,
                     const std::map<unsigned int,Counter> &trajectory_counts,
                     const std::map<unsigned int, std::pair<size_t, size_t> > &trajectoryIdMap,
                     const ActsExamples::TrajectoriesContainer& trajectories,
+                    const std::map<unsigned int, unsigned int> &trajToSeed,
+                    const ActsExamples::TrackParametersContainer &seed_params,
                     const unsigned int floats_per_column) {
-      static std::array<std::string,3 > quality_names{"filt.", "chi2","ndf"};
+      static std::array<std::string,4 > quality_names{"filt.", "chi2","ndf", "p.chi2"};
       std::vector<std::array<double,quality_names.size()> > quality; // filtered, chi2, ndf
       quality.reserve( trajectory_counts.size() );
       unsigned idx=0;
@@ -489,10 +532,29 @@ namespace {
                   ++ndof;
                   return true;
                });
+
+
+            double param_chi2=0.;
+            const auto& fittedParameters = traj.trackParameters(traj_iter->second.second);
+            if (fittedParameters.covariance()) {
+               const auto &cov = fittedParameters.covariance().value();
+               std::map<unsigned int, unsigned int>::const_iterator seed_idx_iter = trajToSeed.find(trajectory.first);
+               if (seed_idx_iter != trajToSeed.end() && seed_idx_iter->second < seed_params.size()) {
+                  const auto& seed_parameters = seed_params.at(seed_idx_iter->second);
+                  std::array<unsigned int,3> check_params{Acts::eBoundPhi,Acts::eBoundTheta,Acts::eBoundQOverP};
+                  for (unsigned int check_i=0; check_i<check_params.size();++check_i) {
+                     unsigned int param_i = check_params[check_i];
+                     param_chi2 += sqr(  fittedParameters.parameters()[param_i]
+                                         - seed_parameters.parameters()[param_i] )/cov(param_i,param_i);
+                  }
+               }
+            }
+
             quality.emplace_back(std::array<double,quality_names.size()>{
                   (traj.isFiltered() ? 0. : 1. ),
                   ndof > 0 ? chi2 / ndof : chi2,
-                  1.*ndof});
+                  1.*ndof,
+                  param_chi2});
          }
          else {
             quality.emplace_back(std::array<double,quality_names.size()>{});
@@ -549,6 +611,8 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
      ctx.eventStore.get<std::vector<std::size_t> >("TrackSeedIdx");
   const auto& protoTracks =
       ctx.eventStore.get<ProtoTrackContainer>("extended_proto_tracks");
+  const auto& initialParameters = ctx.eventStore.get<TrackParametersContainer>(
+      "estimatedparameters");
   const auto& measurements =
      ctx.eventStore.get<ActsExamples::MeasurementContainer>("measurements");
 
@@ -1401,7 +1465,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
 
           // -- chi2, ndf, hit_efficiency, purity
           if (m_cfg.dumpDuplicates) {
-             dumpQuality("Qual.",trajectory_counts, trajectoryIdMap, trajectories,floats_per_col);
+             dumpQuality("Qual.",ctx, trajectory_counts, trajectoryIdMap, trajectories, trajToSeed, initialParameters, floats_per_col);
              for (const std::pair<const ActsFatras::Barcode, Counter> &a_particle : particle_counts) {
                 std::cout << a_particle.first  << ")" << std::endl;
                 dumpHitQuality("", trajectory_counts, a_particle.first, hitsPerParticle, trajectoryBarcodeMap,
@@ -1410,6 +1474,8 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           }
           // -- parameters
           if (m_cfg.dumpDuplicates) {
+             dumpSeeds("SEED", ctx, trajectory_counts, trajToSeed, initialParameters, floats_per_col);
+
              std::vector<double> traj_pt;
              dumpPerigeeParameters("ORIG", ctx, trajectory_counts, trajectoryIdMap, trajectories,traj_pt, floats_per_col);
           }
