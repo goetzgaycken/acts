@@ -879,6 +879,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
     }
   }
   }
+
   for (const std::pair<const ActsFatras::Barcode, std::map<unsigned int, Counter> > &particle_to_trajectories : trajectoriesPerParticle) {
      auto particle_iter = particles.find(particle_to_trajectories.first);
      double particle_pt= particle_iter != particles.end()
@@ -1512,6 +1513,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
     }
     }
   }
+
   if (m_stat.empty()) {
      std::lock_guard<std::mutex> stat_lock(m_mutex);
      m_stat.resize(stat_pt_bins.size());
