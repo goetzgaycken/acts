@@ -713,9 +713,10 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
 
   static unsigned int debug_counter=0;
   // Loop over all trajectories
-  for (auto [itraj, trackTip] : trackTips) {
+  for (std::size_t itraj = 0; itraj < trajectories.size(); ++itraj) {
     const auto& traj = trajectories[itraj];
     const auto& mj = traj.multiTrajectory();
+    for (auto trackTip : traj.tips()) {
     auto trajState =
        Acts::MultiTrajectoryHelpers::trajectoryState(mj, trackTip);
     unsigned int seed_i=(itraj<=seedIdx.size() ? seedIdx[itraj] : std::numeric_limits<unsigned int>::max() );
@@ -877,6 +878,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
        }
     }
   }
+  }
 
   for (const std::pair<const ActsFatras::Barcode, std::map<unsigned int, Counter> > &particle_to_trajectories : trajectoriesPerParticle) {
      auto particle_iter = particles.find(particle_to_trajectories.first);
@@ -915,8 +917,9 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   processed.reserve(trajectoryIdMap.size());
   hit_r.resize( max_hit_index+1, 0.);
 
-  for (auto [itraj, trackTip] : trackTips) {
+  for (std::size_t itraj = 0; itraj < trajectories.size(); ++itraj) {
     const auto& traj = trajectories[itraj];
+    for (auto trackTip : traj.tips()) {
     const auto& mj = traj.multiTrajectory();
     auto trajState =
        Acts::MultiTrajectoryHelpers::trajectoryState(mj, trackTip);
@@ -1508,6 +1511,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           
        }
     }
+  }
   }
 
   if (m_stat.empty()) {
