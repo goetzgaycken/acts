@@ -33,6 +33,7 @@
 #include "ActsExamples/Io/Root/RootTrajectoryStatesWriter.hpp"
 #include "ActsExamples/Io/Root/RootTrajectorySummaryWriter.hpp"
 #include "ActsExamples/Io/Root/RootVertexPerformanceWriter.hpp"
+#include "ActsExamples/Io/Root/RootDigiBase.hpp"
 #include "ActsExamples/Plugins/Obj/ObjPropagationStepsWriter.hpp"
 #include "ActsExamples/Plugins/Obj/ObjTrackingGeometryWriter.hpp"
 #include "ActsExamples/Validation/ResPlotTool.hpp"
@@ -296,6 +297,12 @@ void addOutput(Context& ctx) {
       inputMeasurementParticlesMap, inputVertices, inputTime, filePath,
       treeName, fileMode, minTrackVtxMatchFraction, truthMatchProbMin);
 
+  ACTS_PYTHON_DECLARE_WRITER(ActsExamples::RootDigiWriter, mex,
+                             "RootDigiWriter",
+                             particles,measurements,measurementParticlesMap,filePath,fileMode,
+                             treeName,truthParticlePrefix,truthVertexPrefix,
+                             eventInfoPrefix,measurementPrefix,measurementType,
+                             trackingGeometry);
   // CSV WRITERS
   ACTS_PYTHON_DECLARE_WRITER(ActsExamples::CsvParticleWriter, mex,
                              "CsvParticleWriter", inputParticles, outputDir,
@@ -344,6 +351,7 @@ void addOutput(Context& ctx) {
       invariantMassBins, multiplicityMax, writeOptionalHistograms,
       nSimulatedEvents);
 
+  
   {
     using Writer = ActsExamples::CsvBFieldWriter;
 

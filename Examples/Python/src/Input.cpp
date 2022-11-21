@@ -15,6 +15,7 @@
 #include "ActsExamples/Io/Root/RootMaterialTrackReader.hpp"
 #include "ActsExamples/Io/Root/RootParticleReader.hpp"
 #include "ActsExamples/Io/Root/RootTrajectorySummaryReader.hpp"
+#include "ActsExamples/Io/Root/RootDigiBase.hpp"
 
 #include <memory>
 
@@ -45,6 +46,13 @@ void addInput(Context& ctx) {
                              "RootTrajectorySummaryReader", outputTracks,
                              outputParticles, treeName, filePath,
                              orderedEvents);
+  
+  ACTS_PYTHON_DECLARE_READER(ActsExamples::RootDigiReader, mex,
+                             "RootDigiReader",
+                             particles,measurements,measurementParticlesMap,filePath,fileMode,
+                             treeName,truthParticlePrefix,truthVertexPrefix,
+                             eventInfoPrefix,measurementPrefix,measurementType,
+                             trackingGeometry);
 
   // CSV READERS
   ACTS_PYTHON_DECLARE_READER(ActsExamples::CsvParticleReader, mex,

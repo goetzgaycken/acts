@@ -1,3 +1,4 @@
+add_definitions(-g -O0)
 add_library(
   ActsExamplesIoRoot SHARED
   src/RootMeasurementWriter.cpp
@@ -17,6 +18,7 @@ add_library(
   src/RootTrajectorySummaryWriter.cpp
   src/RootVertexPerformanceWriter.cpp
   src/RootBFieldWriter.cpp
+  src/RootDigiBase.cpp
 )
 target_include_directories(
   ActsExamplesIoRoot
