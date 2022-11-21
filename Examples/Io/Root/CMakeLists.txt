@@ -1,3 +1,4 @@
+add_definitions(-g -O0)
 add_library(
   ActsExamplesIoRoot SHARED
   src/RootMeasurementWriter.cpp
@@ -18,7 +19,9 @@ add_library(
   src/RootVertexPerformanceWriter.cpp
   src/RootBFieldWriter.cpp
   src/RootAthenaNTupleReader.cpp
+  src/RootDigiBase.cpp
 )
+
 target_include_directories(
   ActsExamplesIoRoot
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -33,3 +36,5 @@ target_link_libraries(
 install(
   TARGETS ActsExamplesIoRoot
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+root_generate_dictionary(ActsExamplesIoRootDict  MODULE ActsExamplesIoRoot LINKDEF src/ActsExamplesIoRootLinkDef.h)

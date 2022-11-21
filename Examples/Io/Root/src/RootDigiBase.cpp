@@ -1,0 +1,652 @@
+// This file is part of the Acts project.
+//
+// Copyright (C) 2017 CERN for the benefit of the Acts project
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+#include "ActsExamples/Io/Root/RootDigiBase.hpp"
+
+#include "Acts/Definitions/Units.hpp"
+#include "Acts/Definitions/TrackParametrization.hpp"
+#include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Utilities/Helpers.hpp"
+
+#include "ActsExamples/EventData/Measurement.hpp"
+#include "ActsExamples/EventData/SimParticle.hpp"
+#include "ActsExamples/Framework/WhiteBoard.hpp"
+namespace ActsExamples {
+using HitParticlesMap = IndexMultimap<ActsFatras::Barcode>;
+}
+
+#include "Acts/EventData/SourceLink.hpp"
+
+
+#include <ios>
+#include <stdexcept>
+#include <list>
+#include <signal.h>
+#include <unistd.h>
+
+#include "TFile.h"
+#include "TTree.h"
+#include "TBranch.h"
+
+#define DEBUG_READ 1
+
+ActsExamples::RootDigiBase::RootDigiBase(
+    ActsExamples::RootDigiBase::ConfigBase cfg,
+    const std::string &name,
+    bool write,
+    Acts::Logging::Level lvl)
+   : m_cfg(cfg),
+     m_logger(Acts::getDefaultLogger(name, lvl)),
+     m_write(write)
+ {
+  // inputParticles is already checked by base constructor
+  if (m_cfg.filePath.empty()) {
+    throw std::invalid_argument("Missing file path");
+  }
+  if (m_cfg.treeName.empty()) {
+    throw std::invalid_argument("Missing tree name");
+  }
+
+  // open root file and create the tree
+  if (m_write) {
+     static const std::array<const char *,4> write_modes{"NEW","RECREATE","CREATE","UPDATE"};
+     bool supported=false;
+     for (const char *a_mode : write_modes ) {
+        if (m_cfg.fileMode == a_mode) supported=true;
+     }
+     if (!supported) throw std::runtime_error("unsupported file mode for writing");
+  }
+  else {
+     static const std::array<const char *,2> read_modes{"","READ"};
+     bool supported=false;
+     for (const char *a_mode : read_modes ) {
+        if (m_cfg.fileMode == a_mode) supported=true;
+     }
+     if (!supported) throw std::runtime_error("unsupported file mode for reading");
+  }
+  m_file = TFile::Open(m_cfg.filePath.c_str(), m_cfg.fileMode.c_str());
+  if (m_file == nullptr) {
+    throw std::ios_base::failure("Could not open '" + m_cfg.filePath + "'");
+  }
+  m_file->cd();
+  m_tree = static_cast<TTree *>(m_file->Get(m_cfg.treeName.c_str()));
+  if (m_write) {
+     if (m_tree) std::runtime_error("Tree already exists.");
+     m_tree = new TTree(m_cfg.treeName.c_str(), m_cfg.treeName.c_str());
+     if (m_tree == nullptr) {
+        throw std::bad_alloc();
+     }
+  }
+  else {
+     // initially disable all branches, then enable all used branches
+     m_tree->SetBranchStatus("*",0);
+     //     m_tree->SetMakeClass(1);
+  }
+
+  if (m_cfg.stop) {
+     std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
+     kill(getpid(), SIGSTOP);
+  }
+
+  // setup the branches
+  connectEventInfo(m_cfg.eventInfoPrefix, m_eventInfo);
+  connectParticles(m_cfg.truthParticlePrefix, m_truthParticles);
+  connectVertices(m_cfg.truthVertexPrefix, m_truthVertices);
+  if (m_cfg.measurementPrefix.size() != m_cfg.measurementType.size()) {
+     throw std::range_error("Number of measurement prefixes and measurement types do not match.");
+  }
+  assert (m_clusters.size() == m_sdoInfos.size());
+  int mask=0;
+  for (unsigned int measurement_i=0; measurement_i<m_cfg.measurementPrefix.size(); ++measurement_i) {
+     unsigned int type_i = m_cfg.measurementType[measurement_i];
+     if (type_i >= kNClusterTypes) {
+        throw std::runtime_error("Invalid measurement type. Only 0 : pixel, 1 : strips are currently understood.");
+     }
+     if (mask & (1<<type_i)) {
+        throw std::runtime_error("MeasurementType used more than once.");
+     }
+     mask |= (1<<type_i);
+
+     connectClusters(m_cfg.measurementPrefix[measurement_i], m_clusters[measurement_i]);
+     connectSDOs(m_cfg.measurementPrefix[measurement_i], m_sdoInfo[measurement_i]);
+     switch (type_i) {
+     case kPixel:
+        connectPixelRDOs(m_cfg.measurementPrefix[measurement_i], m_pixelRDOs);
+        break;
+     case kStrip:
+        connectStripRDOs(m_cfg.measurementPrefix[measurement_i], m_stripRDOs);
+        break;
+     default:
+        break;
+     }
+  }
+}
+
+
+void ActsExamples::RootDigiBase::connectEventInfo(const std::string &prefix, ActsExamples::RootDigiBase::EventInfo &event_info) {
+   //   connectBranch((prefix+"runNumber").c_str(),         &m_eventInfo.runNumber);
+   connectBranch((prefix+"eventNumber").c_str(),       &event_info.eventNumber);
+   //   connectBranch((prefix+"lumiBlock").c_str(),         &m_eventInfo.lumiBlock);
+   //   connectBranch((prefix+"timeStamp").c_str(),         &m_eventInfo.timeStamp);
+   //   connectBranch((prefix+"timeStampNSOffset").c_str(), &m_eventInfo.timeStampNSOffset);
+   //   connectBranch((prefix+"bcid").c_str(),              &m_eventInfo.bcid);
+}
+
+void ActsExamples::RootDigiBase::connectParticles(const std::string &prefix, ActsExamples::RootDigiBase::ParticleContainer &particles) {
+   connectBranch((prefix+"pdgId").c_str(),                    &particles.pdgId);
+   connectBranch((prefix+"barcode").c_str(),                  &particles.barcode);
+   connectBranch((prefix+"status").c_str(),                   &particles.status);
+   connectBranch((prefix+"prodVtxLink_").c_str(),              &particles.n_prodVtxLink);
+   //   connectBranch((prefix+"prodVtxLink.m_persKey").c_str(),     particles.prodVtxLink_m_persKey);
+   connectBranch((prefix+"prodVtxLink.m_persIndex").c_str(),   particles.prodVtxLink_m_persIndex);
+   connectBranch((prefix+"decayVtxLink_").c_str(),             &particles.n_decayVtxLink);
+   //   connectBranch((prefix+"decayVtxLink.m_persKey").c_str(),    particles.decayVtxLink_m_persKey);
+   connectBranch((prefix+"decayVtxLink.m_persIndex").c_str(),  particles.decayVtxLink_m_persIndex);
+   connectBranch((prefix+"px").c_str(),                       &particles.px);
+   connectBranch((prefix+"py").c_str(),                       &particles.py);
+   connectBranch((prefix+"pz").c_str(),                       &particles.pz);
+   connectBranch((prefix+"e").c_str(),                        &particles.e);
+   connectBranch((prefix+"m").c_str(),                        &particles.m);
+}
+
+void ActsExamples::RootDigiBase::connectVertices(const std::string &prefix, ActsExamples::RootDigiBase::ParticleVertexContainer &vertices) {
+   //   connectBranch((prefix+"id").c_str(),                    &vertices.id);
+   connectBranch((prefix+"barcode").c_str(),               &vertices.barcode);
+   //   connectBranch((prefix+"incomingParticleLinks").c_str(), &vertices.incomingParticleLinks);
+   //   connectBranch((prefix+"outgoingParticleLinks").c_str(), &vertices.outgoingParticleLinks);
+   connectBranch((prefix+"x").c_str(),                     &vertices.x);
+   connectBranch((prefix+"y").c_str(),                     &vertices.y);
+   connectBranch((prefix+"z").c_str(),                     &vertices.z);
+   connectBranch((prefix+"t").c_str(),                     &vertices.t);
+}
+void ActsExamples::RootDigiBase::connectClusters(const std::string &prefix, ActsExamples::RootDigiBase::ClusterContainer &clusters) {
+   //   connectBranch((prefix+"identifier").c_str(),         &clusters.identifier);
+   //   connectBranch((prefix+"rdoIdentifierList").c_str(),  &clusters.rdoIdentifierList);
+   connectBranch((prefix+"localX").c_str(),             &clusters.localX);
+   connectBranch((prefix+"localY").c_str(),             &clusters.localY);
+   connectBranch((prefix+"localXError").c_str(),        &clusters.localXError);
+   connectBranch((prefix+"localYError").c_str(),        &clusters.localYError);
+   connectBranch((prefix+"localXYCorrelation").c_str(), &clusters.localXYCorrelation);
+   connectBranch((prefix+"globalX").c_str(),            &clusters.globalX);
+   connectBranch((prefix+"globalY").c_str(),            &clusters.globalY);
+   connectBranch((prefix+"globalZ").c_str(),            &clusters.globalZ);
+   connectBranch((prefix+"detectorElementID").c_str(),  &clusters.detectorElementID);
+}
+void ActsExamples::RootDigiBase::connectPixelRDOs(const std::string &prefix, ActsExamples::RootDigiBase::PixelContainer &pixel_rdos) {
+   connectBranch((prefix+"rdo_phi_pixel_index").c_str(), &pixel_rdos.loc0idx);
+   connectBranch((prefix+"rdo_eta_pixel_index").c_str(), &pixel_rdos.loc1idx);
+   connectBranch((prefix+"rdo_charge").c_str(),          &pixel_rdos.charge);
+   connectBranch((prefix+"waferID").c_str(),             &pixel_rdos.waferID);
+}
+void ActsExamples::RootDigiBase::connectStripRDOs(const std::string &prefix, ActsExamples::RootDigiBase::StripContainer &strip_rdos) {
+   connectBranch((prefix+"SiWidth").c_str(),            &strip_rdos.SiWidth);
+   connectBranch((prefix+"hitsInThirdTimeBin").c_str(), &strip_rdos.hitsInThirdTimeBin);
+   connectBranch((prefix+"side").c_str(),               &strip_rdos.side);
+   connectBranch((prefix+"rdo_strip").c_str(),          &strip_rdos.strip);
+   connectBranch((prefix+"rdo_timebin").c_str(),        &strip_rdos.timebin);
+   connectBranch((prefix+"rdo_groupsize").c_str(),      &strip_rdos.groupsize);
+}
+
+void ActsExamples::RootDigiBase::connectSDOs(const std::string &prefix, ActsExamples::RootDigiBase::SDOInfoContainer &sdos) {
+   connectBranch((prefix+"sdo_words").c_str(),           &sdos.sdo_words);
+   connectBranch((prefix+"sdo_depositsBarcode").c_str(), &sdos.sim_depositsBarcode);
+   connectBranch((prefix+"sdo_depositsEnergy").c_str(),  &sdos.sim_depositsEnergy);
+}
+
+ActsExamples::RootDigiBase::~RootDigiBase() {
+  if (m_file != nullptr) {
+    m_file->Close();
+  }
+}
+
+ActsExamples::ProcessCode ActsExamples::RootDigiBase::endRunBase() {
+  if (m_write && m_tree && m_file) {
+    m_file->cd();
+    m_file->Write();
+    ACTS_INFO("Wrote tree '" << m_tree->GetName() << "' in '"
+              << m_file->GetName()  << "'");
+  }
+
+  if (m_file != nullptr) {
+    m_file->Close();
+  }
+
+  return ProcessCode::SUCCESS;
+}
+
+ActsExamples::RootDigiWriter::RootDigiWriter() {
+   m_cfg.fileMode="RECREATE";
+   m_write=true;
+}
+ActsExamples::RootDigiWriter::RootDigiWriter(ActsExamples::RootDigiWriter::Config cfg, Acts::Logging::Level lvl)
+   :ActsExamples::RootDigiBase::RootDigiBase(cfg, "RootDigiWriter", true, lvl)
+{
+}
+
+ActsExamples::ProcessCode ActsExamples::RootDigiWriter::write(const AlgorithmContext& ctx) {
+  if (m_file == nullptr) {
+    ACTS_ERROR("Missing output file");
+    return ProcessCode::ABORT;
+  }
+  const ActsExamples::SimParticleContainer &particles = ctx.eventStore.get<ActsExamples::SimParticleContainer>(m_cfg.particles);
+
+  // ensure exclusive access to tree/file while writing
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  m_eventInfo.eventNumber = ctx.eventNumber;
+  m_truthParticles.clear();
+  std::vector< std::array<float,4 > > vertex_position;
+
+  m_truthVertices.clear();
+  m_truthParticles.clear();
+  m_truthParticles.reserve( particles.size());
+  for (const auto& particle : particles) {
+     //     void push_back( int a_pdg_id, int a_barcode, int a_status, int a_prod_vtx_idx, int a_decay_vtx_idx,
+     //              float a_px, float a_py, float a_pz, float a_m) {
+     const auto p = particle.absoluteMomentum() / Acts::UnitConstants::MeV;
+     const auto particle_direction = particle.unitDirection();
+     m_truthParticles.push_back(particle.pdg(),particle.particleId().particle(),2,-particle.particleId().vertexPrimary(),0,
+                                p * particle_direction.x(),
+                                p * particle_direction.y(),
+                                p * particle_direction.z(),
+                                particle.mass() / Acts::UnitConstants::MeV);
+     if (particle.particleId().vertexPrimary()>= vertex_position.size()) {
+        vertex_position.resize(particle.particleId().vertexPrimary()+1);
+     }
+     vertex_position[particle.particleId().vertexPrimary()] = std::array<float,4> {
+        static_cast<float>(particle.fourPosition().x() / Acts::UnitConstants::mm),
+        static_cast<float>(particle.fourPosition().y() / Acts::UnitConstants::mm),
+        static_cast<float>(particle.fourPosition().z() / Acts::UnitConstants::mm),
+        static_cast<float>(particle.fourPosition().w() / Acts::UnitConstants::ns)
+     };
+  }
+  int idx=0;
+  for (const std::array<float, 4> &vertex : vertex_position) {
+     m_truthVertices.push_back(-idx, vertex[0],vertex[1],vertex[2],vertex[3]);
+     ++idx;
+  }
+
+  const auto& measurements =
+     ctx.eventStore.get<ActsExamples::MeasurementContainer>(m_cfg.measurements);
+  const auto& hitParticlesMap =
+      ctx.eventStore.get<HitParticlesMap>(m_cfg.measurementParticlesMap);
+
+  //m_cfg.trackingGeometry), ctx.geoContext
+  for (unsigned int meas_i=0; meas_i<measurements.size(); ++meas_i) {
+
+     const auto &meas=measurements[meas_i];
+
+     const auto& slink =
+        std::visit([](const auto& x) { return &x.sourceLink(); }, meas);
+
+     const auto geoId = slink->geometryId();
+
+     const Acts::Surface* surface = m_cfg.trackingGeometry->findSurface(geoId);
+     auto [localPos, localCov, meas_dim] = std::visit(
+                                                      [](const auto& measurement) {
+                                                         auto expander = measurement.expander();
+                                                         Acts::BoundVector par = expander * measurement.parameters();
+                                                         Acts::BoundSymMatrix cov =
+                                                         expander * measurement.covariance() * expander.transpose();
+                                                         // extract local position
+                                                         Acts::Vector2 lpar(par[Acts::eBoundLoc0], par[Acts::eBoundLoc1]);
+                                                         // extract local position covariance.
+                                                         Acts::SymMatrix2 lcov = cov.block<2, 2>(Acts::eBoundLoc0, Acts::eBoundLoc0);
+                                                         return std::make_tuple(lpar, lcov, measurement.size());
+                                                      },
+                                                      meas);
+     Acts::Vector3 globalPos = surface->localToGlobal(ctx.geoContext, localPos, Acts::Vector3());
+
+     EClusterTypes cluster_type = meas_dim == 2 ? kPixel : kStrip; // @TODO should use geoId
+
+     //     void push_back(float a_localX, float a_localY, float a_localXError, float a_localYError, float a_localXYCorrelation,
+     //               float a_globalX, float a_globalY, float a_globalZ, unsigned long a_detectorElementID) {
+     m_clusters[ cluster_type ].push_back( localPos[0],localPos[1],localCov(0,0),localCov(0,0),localCov(0,1),
+                                                             globalPos[0],globalPos[1],globalPos[2], geoId.value());
+
+     std::vector<int> sdo_word;
+     std::vector< std::vector<int> > sdo_barcode;
+     std::vector< std::vector<float> > sdo_depositsEnergy;
+     auto matchingParticles = makeRange(hitParticlesMap.equal_range(meas_i));
+     sdo_word.reserve(sdo_word.size());
+     sdo_barcode.reserve(sdo_barcode.size());
+     sdo_depositsEnergy.reserve(sdo_depositsEnergy.size());
+
+     for (auto hitParticle : matchingParticles) {
+        sdo_word.push_back(0);
+        sdo_barcode.emplace_back();
+        sdo_barcode.back().push_back(hitParticle.second.particle());
+        sdo_depositsEnergy.emplace_back();
+        sdo_depositsEnergy.back().push_back(std::numeric_limits<float>::epsilon());
+     }
+     m_sdoInfo[cluster_type].push_back(std::move(sdo_word), std::move(sdo_barcode), std::move(sdo_depositsEnergy));
+  }
+
+  m_tree->Fill();
+
+
+  return ProcessCode::SUCCESS;
+}
+
+ActsExamples::RootDigiReader::RootDigiReader() {
+   m_cfg.fileMode="READ";
+   m_write=false;
+}
+
+ActsExamples::RootDigiReader::RootDigiReader(ActsExamples::RootDigiReader::Config cfg, Acts::Logging::Level lvl)
+   : ActsExamples::RootDigiBase::RootDigiBase(cfg, "RootDigiWriter", false, lvl)
+{
+}
+
+std::pair<size_t, size_t> ActsExamples::RootDigiReader::availableEvents() const {
+   return std::make_pair(0u, m_tree->GetEntries() );
+}
+
+ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmContext& ctx) {
+    auto entry = ctx.eventNumber;
+    // if (not m_cfg.orderedEvents and entry < m_entryNumbers.size()) {
+    //   entry = m_entryNumbers[entry];
+    // }
+    // @TODO in case the input is a chain, detect tree changes and re-collect the active branches.
+    //    m_tree->GetEntry(entry);
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    Long64_t current_tree_entry = m_tree->LoadTree(entry);
+    if (current_tree_entry < 0) return ProcessCode::ABORT;
+
+    for (TBranch *branch : m_activeBranches) {
+       Long_t read_bytes = branch->GetEntry(current_tree_entry);
+       if (read_bytes <=0 ) {
+          ACTS_ERROR("Failed to read branch " << branch->GetName() << " from file " << (m_tree->GetDirectory() ? m_tree->GetDirectory()->GetFile()->GetName() : "") );
+       }
+       else {
+          TClass *the_class;
+          EDataType the_type;
+          branch->GetExpectedType(the_class,the_type);
+          std::cout << "DEBUG " << name() << " read " << read_bytes << " for " << branch->GetName()
+                    << " adr= " << static_cast<const void *>(branch->GetAddress())
+                    << " type: " << (the_class && the_class->GetTypeInfo() ? the_class->GetTypeInfo()->name() : "")
+                    << " " << the_type
+                    << std::endl;
+       }
+
+    }
+    if ( m_stat.empty() ) {
+       m_stat.emplace_back( m_cfg.eventInfoPrefix,std::vector<std::pair<std::string,Stat> >() );
+       m_stat.emplace_back( m_cfg.truthParticlePrefix, std::vector<std::pair<std::string,Stat> >() );
+       m_stat.emplace_back( m_cfg.truthVertexPrefix, std::vector<std::pair<std::string,Stat> >() );
+       for (unsigned int measurement_i=0; measurement_i<m_cfg.measurementPrefix.size(); ++measurement_i) {
+          m_stat.emplace_back( m_cfg.measurementPrefix[measurement_i], std::vector<std::pair<std::string,Stat> >() );
+          m_stat.emplace_back( m_cfg.measurementPrefix[measurement_i]+" SDO", std::vector<std::pair<std::string,Stat> >() );
+          switch (m_cfg.measurementType[measurement_i] ) {
+          case kPixel:
+             m_stat.emplace_back( m_cfg.measurementPrefix[measurement_i]+" pixelRDOs", std::vector<std::pair<std::string,Stat> >() );
+             break;
+          case kStrip:
+             m_stat.emplace_back( m_cfg.measurementPrefix[measurement_i]+" stripRDOs", std::vector<std::pair<std::string,Stat> >() );
+             break;
+          }
+       }
+    }
+
+
+    unsigned int stat_i=0;
+    m_eventInfo.fillStat(m_stat.at(stat_i++).second);
+    m_truthParticles.fillStat(m_stat.at(stat_i++).second);
+    m_truthVertices.fillStat(m_stat.at(stat_i++).second);
+    for (unsigned int measurement_i=0; measurement_i<m_cfg.measurementPrefix.size(); ++measurement_i) {
+       m_clusters[measurement_i].fillStat(m_stat.at(stat_i++).second);
+       m_sdoInfo[measurement_i].fillStat(m_stat.at(stat_i++).second);
+       switch (m_cfg.measurementType[measurement_i] ) {
+       case kPixel:
+          m_pixelRDOs.fillStat(m_stat.at(stat_i++).second);
+          break;
+       case kStrip:
+          m_stripRDOs.fillStat(m_stat.at(stat_i++).second);
+          break;
+       }
+    }
+
+# ifdef DEBUG_READ
+    std::cout << "DEBUG " << name() << " " << m_eventInfo.eventNumber
+              << " barcode=" << m_truthParticles.barcode.size() << " (" << static_cast<const void *>(&m_truthParticles.barcode) << ") "
+              << " globalX=" << m_clusters[kPixel].globalX->size()  << " (" << static_cast<const void *>(m_clusters[kPixel].globalX) << ") "
+              << std::endl;
+    unsigned int counter=0;
+    for ( const auto &elm : m_truthParticles.barcode) {
+       if (counter %20==0) {
+          if (counter>0) std::cout << std::endl;
+          std::cout << "DEBUG " << name();
+       }
+       std::cout << " " << elm << std::endl;
+       ++counter;
+    }
+    if (counter>0) std::cout << std::endl;
+    counter=0;
+    if (m_clusters[kPixel].globalX) {
+    for ( const auto &elm : *(m_clusters[kPixel].globalX)) {
+       if (counter %20==0) {
+          if (counter>0) std::cout << std::endl;
+          std::cout << "DEBUG " << name();
+       }
+       std::cout << " " << elm << std::endl;
+       ++counter;
+    }
+    }
+    if (counter>0) std::cout << std::endl;
+# endif
+
+  std::map<int, ActsFatras::Barcode>  barcode_map = convertParticles(ctx);
+  convertMeasurements(ctx, barcode_map);
+  return ProcessCode::SUCCESS;
+}
+
+std::map<int, ActsFatras::Barcode> ActsExamples::RootDigiReader::convertParticles(const AlgorithmContext& ctx) {
+  SimParticleContainer particles;
+  m_truthParticles.checkDimensions();
+  m_truthVertices.checkDimensions();
+  std::map<int, ActsFatras::Barcode> barcode_map;
+  for (unsigned int particle_i = 0; particle_i < m_truthParticles.pdgId.size(); ++particle_i) {
+     // somehow map the input barcode and vertex index to the ActsFatras::Barcode
+     unsigned int vertex_i = (m_truthParticles.n_prodVtxLink>0 && particle_i < static_cast<unsigned int>(m_truthParticles.n_prodVtxLink)
+                              ? m_truthParticles.prodVtxLink_m_persIndex[ particle_i ]
+                              : std::numeric_limits<unsigned int>::max() );
+     if  (vertex_i & 0xff000000) {
+        if (m_truthParticles.n_prodVtxLink<=0 || particle_i >= static_cast<unsigned int>(m_truthParticles.n_prodVtxLink))  {
+           ACTS_ERROR("No vertex for  " << particle_i << " !< " << m_truthParticles.n_prodVtxLink << " -> " << (vertex_i & 0xffffff) );
+        }
+        else {
+           ACTS_ERROR("Precision loss for vertex index of particle " << particle_i << " : " << vertex_i
+                      << " -> " << (vertex_i & 0xffffff) );
+        }
+     }
+
+     const auto pid = ActsFatras::Barcode(0u)
+        .setParticle(m_truthParticles.barcode.at(particle_i) & 0xffff)
+        .setSubParticle((m_truthParticles.barcode.at(particle_i)>>16) & 0xffff)
+        .setVertexPrimary( (vertex_i & 0xfff) )
+        .setVertexSecondary( ((vertex_i>>12) & 0xfff) );
+
+     std::pair<std::map<int, ActsFatras::Barcode>::const_iterator, bool>
+        insert_result =  barcode_map.insert( std::make_pair(m_truthParticles.barcode.at(particle_i), pid) );
+     if (!insert_result.second) {
+        ACTS_ERROR("Barcode " << m_truthParticles.barcode.at(particle_i) << " not unique. Old dest : " << insert_result.first->second
+                   << " New dest " << pid);
+     }
+     //  set vertix part
+     ActsFatras::Particle particle(pid,
+                                   Acts::PdgParticle(m_truthParticles.pdgId.at(particle_i)),
+                                   m_truthParticles.pdgId.at(particle_i) >= 0 ? 1. : -1, // charge
+                                   m_truthParticles.m.at(particle_i));
+     Acts::Vector3 dir(m_truthParticles.px.at(particle_i),
+                       m_truthParticles.py.at(particle_i),
+                       m_truthParticles.pz.at(particle_i));
+     double abs_p = dir.norm();
+     particle.setAbsoluteMomentum(abs_p);
+     particle.setDirection(dir * (1/abs_p));
+     particle.setPosition4(m_truthVertices.x.at(vertex_i),
+                           m_truthVertices.y.at(vertex_i),
+                           m_truthVertices.z.at(vertex_i),
+                           m_truthVertices.t.at(vertex_i));
+  }
+  ctx.eventStore.add(m_cfg.particles, std::move(particles));
+  return barcode_map;
+}
+
+namespace {
+   Acts::GeometryIdentifier findGeoId(const ActsExamples::AlgorithmContext& ctx,
+                                      const Acts::TrackingGeometry &trackingGeometry,
+                                      std::map<unsigned long, Acts::GeometryIdentifier> &geo_map,
+                                      unsigned long detector_element_id,
+                                      const Acts::Vector3 &global_pos,
+                                      const double &max_error) {
+      std::map<unsigned long, Acts::GeometryIdentifier>::const_iterator
+         geomap_iter = geo_map.find(detector_element_id);
+      if (geomap_iter == geo_map.end()) {
+
+
+         const Acts::TrackingVolume* volume = trackingGeometry.lowestTrackingVolume(ctx.geoContext,
+                                                                              global_pos);
+         const Acts::TrackingVolume* final_volume = nullptr;
+         while (volume  != final_volume) {
+            final_volume = volume->lowestTrackingVolume(ctx.geoContext,
+                                                       global_pos,
+                                                       max_error);
+         }
+         if (final_volume) {
+            const Acts::Surface* min_surface=nullptr;
+            double min_distance2=std::numeric_limits<double>::max();
+
+            final_volume->visitSurfaces([&ctx, &max_error, &global_pos, &min_distance2, &min_surface](const Acts::Surface* surface) {
+               Acts::Vector3 dummy_momentum{};
+               Acts::Result<Acts::Vector2> result = surface->globalToLocal(ctx.geoContext,
+                                                                           global_pos,
+                                                                           dummy_momentum,
+                                                                           max_error);
+               if (result .ok()) {
+                  Acts::BoundaryCheck bcheck(true);
+                  if (surface->bounds().inside(result.value(), bcheck)) {
+                     Acts::Vector3 on_surface = surface->localToGlobal(ctx.geoContext,
+                                                                       result.value(),
+                                                                       dummy_momentum);
+                     double distance2 = (global_pos - on_surface).squaredNorm();
+                     if (distance2<min_distance2) {
+                        min_distance2 = distance2;
+                        min_surface = surface;
+                     }
+
+                  }
+               }
+            });
+            if (min_surface) {
+
+               const Acts::Layer* layer = min_surface->associatedLayer();
+               if (layer) {
+                  std::pair<std::map<unsigned long, Acts::GeometryIdentifier>::const_iterator, bool>
+                     insert_result = geo_map.insert( std::make_pair(detector_element_id, layer->geometryId()));
+                  if (insert_result.second) {
+                     return insert_result.first->second;
+                  }
+                  else {
+                     std::cout << "DEBUG detector element " << detector_element_id << " is already maped to "
+                               << insert_result.first->second << " new: " << layer->geometryId() << std::endl;
+                     return layer->geometryId();
+                  }
+               }
+
+            }
+         }
+
+         std::stringstream msg;
+         msg << "No matching geometry element found for " << detector_element_id  <<  " pos: "
+             << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2] << " .";
+         throw std::runtime_error( msg.str() );
+      }
+      return geomap_iter->second;
+   }
+   ActsFatras::Barcode findParticleBarCode(const std::map<int, ActsFatras::Barcode> &barcode_map, int source_barcode) {
+      std::map<int, ActsFatras::Barcode>::const_iterator  barcode_iter = barcode_map.find(source_barcode);
+      if (barcode_iter == barcode_map.end()) {
+         std::stringstream msg;
+         msg << "Unknown particle barcode " << source_barcode <<  " .";
+         throw std::runtime_error( msg.str() );
+      }
+      return barcode_iter->second;
+   }
+}
+void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& ctx,
+                                                       const std::map<int, ActsFatras::Barcode> &barcode_map) {
+  std::list<IndexSourceLink> sourceLinkStorage;
+  IndexSourceLinkContainer sourceLinks;
+  MeasurementContainer measurements;
+  IndexMultimap<ActsFatras::Barcode> measurementParticlesMap;
+  std::map<unsigned long, Acts::GeometryIdentifier> geo_map;
+  //  IndexMultimap<Index> measurementSimHitsMap;
+
+  unsigned int container_i=0;
+  for (const ClusterContainer &cluster_container : m_clusters ) {
+     cluster_container.checkDimensions();
+     const SDOInfoContainer &sdo_info = m_sdoInfo.at(container_i);
+     sdo_info.checkDimensions(cluster_container.localX->size());
+
+     for (unsigned int meas_i=0; meas_i < cluster_container.localX->size(); ++meas_i) {
+        Index measurementIdx = measurements.size();
+        Acts::GeometryIdentifier geoId =  findGeoId(ctx,
+                                                    *(m_cfg.trackingGeometry),
+                                                    geo_map,
+                                                    cluster_container.detectorElementID->at(meas_i),
+                                                    Acts::Vector3(cluster_container.globalX->at(meas_i),
+                                                                  cluster_container.globalY->at(meas_i),
+                                                                  cluster_container.globalZ->at(meas_i)),
+                                                    std::max(cluster_container.localXError->at(meas_i),
+                                                             cluster_container.localYError->at(meas_i)));
+
+        sourceLinkStorage.emplace_back(geoId, measurementIdx);
+        IndexSourceLink& sourceLink = sourceLinkStorage.back();
+
+        sourceLinks.insert(sourceLink);
+
+        // @TODO currently only 2D measurements are supported.
+        std::array<Acts::BoundIndices, 2> indices {Acts::BoundIndices(0u),Acts::BoundIndices(1u)};
+        Acts::ActsVector<2>    par { cluster_container.localX->at(meas_i),
+                                     cluster_container.localY->at(meas_i)} ;
+        Acts::ActsSymMatrix<2> cov;
+        cov(0,0) = cluster_container.localXError->at(meas_i);
+        cov(1,1) = cluster_container.localYError->at(meas_i);
+        cov(0,1) = cluster_container.localXYCorrelation->at(meas_i);
+        cov(1,0) = cluster_container.localXYCorrelation->at(meas_i);
+
+        measurements.emplace_back( Acts::Measurement<Acts::BoundIndices, 2>(sourceLink, indices, par, cov) );
+
+        for ( const std::vector<int>  &sim_hit_list : sdo_info.sim_depositsBarcode->at(meas_i) ) {
+           for ( const int  &sim_barcode : sim_hit_list ) {
+              measurementParticlesMap.emplace_hint(measurementParticlesMap.end(),
+                                                   measurementIdx,
+                                                   findParticleBarCode(barcode_map, sim_barcode));
+           }
+        }
+     }
+     ++container_i;
+  }
+
+  ctx.eventStore.add(m_cfg.sourceLinks, std::move(sourceLinks));
+  ctx.eventStore.add(m_cfg.sourceLinks + "__storage",
+                     std::move(sourceLinkStorage));
+  ctx.eventStore.add(m_cfg.measurements, std::move(measurements));
+  ctx.eventStore.add(m_cfg.measurementParticlesMap,
+                     std::move(measurementParticlesMap));
+}
+
+
+void ActsExamples::RootDigiReader::showStat() const {
+   for (const std::pair< std::string, std::vector<std::pair<std::string, Stat>  > > &stat_list :  m_stat ) {
+      for (const std::pair<std::string, Stat> &a_stat :  stat_list.second ) {
+         std::cout << stat_list.first << " " << a_stat.first << " : " << a_stat.second << std::endl;
+      }
+   }
+}
