@@ -18,7 +18,7 @@
 #include "Acts/Geometry/TrackingGeometry.hpp"
 #include <mutex>
 
-#include "Stat.h"
+#include "ActsExamples/Utilities/Stat.h"
 
 class TFile;
 class TTree;
