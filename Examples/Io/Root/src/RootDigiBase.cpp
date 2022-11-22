@@ -82,8 +82,10 @@ ActsExamples::RootDigiBase::RootDigiBase(
      m_tree->SetMakeClass(1);
   }
 
-  std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
-  kill(getpid(), SIGSTOP);
+  if (m_cfg.stop) {
+     std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
+     kill(getpid(), SIGSTOP);
+  }
 
   // setup the branches
   connectEventInfo(m_cfg.eventInfoPrefix, m_eventInfo);
@@ -133,10 +135,10 @@ void ActsExamples::RootDigiBase::connectParticles(const std::string &prefix, Act
    connectBranch((prefix+"pdgId").c_str(),                    &particles.pdgId);
    connectBranch((prefix+"barcode").c_str(),                  &particles.barcode);
    connectBranch((prefix+"status").c_str(),                   &particles.status);
-   connectBranch((prefix+"prodVtxLink").c_str(),              &particles.n_prodVtxLink);
+   connectBranch((prefix+"prodVtxLink_").c_str(),              &particles.n_prodVtxLink);
    //   connectBranch((prefix+"prodVtxLink.m_persKey").c_str(),     particles.prodVtxLink_m_persKey);
    connectBranch((prefix+"prodVtxLink.m_persIndex").c_str(),   particles.prodVtxLink_m_persIndex);
-   connectBranch((prefix+"decayVtxLink").c_str(),             &particles.n_decayVtxLink);
+   connectBranch((prefix+"decayVtxLink_").c_str(),             &particles.n_decayVtxLink);
    //   connectBranch((prefix+"decayVtxLink.m_persKey").c_str(),    particles.decayVtxLink_m_persKey);
    connectBranch((prefix+"decayVtxLink.m_persIndex").c_str(),  particles.decayVtxLink_m_persIndex);
    connectBranch((prefix+"px").c_str(),                       &particles.px);
@@ -171,7 +173,7 @@ void ActsExamples::RootDigiBase::connectClusters(const std::string &prefix, Acts
 }
 void ActsExamples::RootDigiBase::connectPixelRDOs(const std::string &prefix, ActsExamples::RootDigiBase::PixelContainer &pixel_rdos) {
    connectBranch((prefix+"rdo_phi_pixel_index").c_str(), &pixel_rdos.loc0idx);
-   connectBranch((prefix+"rdo_eta_pixel_index").c_str(), &pixel_rdos.loc0idx);
+   connectBranch((prefix+"rdo_eta_pixel_index").c_str(), &pixel_rdos.loc1idx);
    connectBranch((prefix+"rdo_charge").c_str(),          &pixel_rdos.charge);
    connectBranch((prefix+"waferID").c_str(),             &pixel_rdos.waferID);
 }
@@ -346,6 +348,8 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
     // }
     // @TODO in case the input is a chain, detect tree changes and re-collect the active branches.
     //    m_tree->GetEntry(entry);
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     Long64_t current_tree_entry = m_tree->LoadTree(entry);
     if (current_tree_entry < 0) return ProcessCode::ABORT;
 
@@ -366,10 +370,46 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
        }
        
     }
+    if ( m_stat.empty() ) {
+       m_stat.emplace_back( m_cfg.eventInfoPrefix,std::vector<std::pair<std::string,Stat> >() );
+       m_stat.emplace_back( m_cfg.truthParticlePrefix, std::vector<std::pair<std::string,Stat> >() );
+       m_stat.emplace_back( m_cfg.truthVertexPrefix, std::vector<std::pair<std::string,Stat> >() );
+       for (unsigned int measurement_i=0; measurement_i<m_cfg.measurementPrefix.size(); ++measurement_i) {
+          m_stat.emplace_back( m_cfg.measurementPrefix[measurement_i], std::vector<std::pair<std::string,Stat> >() );
+          m_stat.emplace_back( m_cfg.measurementPrefix[measurement_i]+" SDO", std::vector<std::pair<std::string,Stat> >() );
+          switch (m_cfg.measurementType[measurement_i] ) {
+          case kPixel:
+             m_stat.emplace_back( m_cfg.measurementPrefix[measurement_i]+" pixelRDOs", std::vector<std::pair<std::string,Stat> >() );
+             break;
+          case kStrip:
+             m_stat.emplace_back( m_cfg.measurementPrefix[measurement_i]+" stripRDOs", std::vector<std::pair<std::string,Stat> >() );
+             break;
+          }
+       }
+    }
+
+
+    unsigned int stat_i=0;
+    m_eventInfo.fillStat(m_stat.at(stat_i++).second);
+    m_truthParticles.fillStat(m_stat.at(stat_i++).second);
+    m_truthVertices.fillStat(m_stat.at(stat_i++).second);
+    for (unsigned int measurement_i=0; measurement_i<m_cfg.measurementPrefix.size(); ++measurement_i) {
+       m_clusters[measurement_i].fillStat(m_stat.at(stat_i++).second);
+       m_sdoInfo[measurement_i].fillStat(m_stat.at(stat_i++).second);
+       switch (m_cfg.measurementType[measurement_i] ) {
+       case kPixel:
+          m_pixelRDOs.fillStat(m_stat.at(stat_i++).second);
+          break;
+       case kStrip:
+          m_stripRDOs.fillStat(m_stat.at(stat_i++).second);
+          break;
+       }
+    }
+    
 
     std::cout << "DEBUG " << name() << " " << m_eventInfo.eventNumber
               << " barcode=" << m_truthParticles.barcode.size() << " (" << static_cast<const void *>(&m_truthParticles.barcode) << ") "
-              << " globalX=" << m_clusters[kPixel].globalX.size()  << " (" << static_cast<const void *>(&m_clusters[kPixel].globalX) << ") "
+              << " globalX=" << m_clusters[kPixel].globalX->size()  << " (" << static_cast<const void *>(m_clusters[kPixel].globalX) << ") "
               << std::endl;
     unsigned int counter=0;
     for ( const auto &elm : m_truthParticles.barcode) {
@@ -397,4 +437,12 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
     // std::cout <<"DEBUG " << name() << " wait for CONT " << getpid() << std::endl;
     // kill (getpid(), SIGSTOP);
   return ProcessCode::SUCCESS;
+}
+
+void ActsExamples::RootDigiReader::showStat() const {
+   for (const std::pair< std::string, std::vector<std::pair<std::string, Stat>  > > &stat_list :  m_stat ) {
+      for (const std::pair<std::string, Stat> &a_stat :  stat_list.second ) {
+         std::cout << stat_list.first << " " << a_stat.first << " : " << a_stat.second << std::endl;
+      }
+   }
 }

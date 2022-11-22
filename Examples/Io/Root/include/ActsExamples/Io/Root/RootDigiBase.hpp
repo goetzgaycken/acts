@@ -26,9 +26,13 @@ class TFile;
 
 #include "TTree.h"
 #include "TBranch.h"
+#include "TBranchElement.h"
 #include "TLeaf.h"
 #include "TClass.h"
 #include "TVirtualStreamerInfo.h"
+
+#include "ActsExamples/Utilities/Stat.h"
+
 
 namespace ActsExamples {
 
@@ -69,6 +73,9 @@ class RootDigiBase {
 
     /// the tracking geometry necessary to match measurements to surfaces and/or perform local to global transformations
     std::shared_ptr<const Acts::TrackingGeometry> trackingGeometry;
+
+    /// send stop signal to precess upon construction to allow attaching a debugger
+    bool stop = false;
   };
   RootDigiBase() = default;
   /// Construct the particle writer.
@@ -108,7 +115,20 @@ class RootDigiBase {
   /// Event identifier.
   struct EventInfo {
      //     UInt_t          runNumber;
-     uint64_t       eventNumber;
+     ULong64_t       eventNumber;
+
+     enum EStat {
+        kStat_eventNumber,
+        kNStat
+     };
+     void fillStat(std::vector<std::pair<std::string, Stat> > &stat) {
+        if (stat.empty()) {
+           stat.reserve(kNStat);
+           stat.push_back(std::make_pair(std::string("eventNumber"),Stat()));
+        }
+        if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
+        stat[kStat_eventNumber].second.add(eventNumber);
+     }
      //     UInt_t          lumiBlock;
      //     UInt_t          timeStamp;
      //     UInt_t          timeStampNSOffset;
@@ -121,7 +141,19 @@ class RootDigiBase {
   // };
   using Int_t = int32_t;
   using UInt_t = uint32_t;
-   
+
+  template <class T_Value>
+  struct StatFiller {
+     StatFiller() = delete;
+     StatFiller(StatFiller &&a_stat) = default;
+     StatFiller(const StatFiller &a_stat) = default;
+     StatFiller(Stat &a_stat) : m_stat(&a_stat) {}
+     void operator()(const T_Value &value) { m_stat->add(value); }
+     void operator()(const std::vector<T_Value> &value) { for( const auto &elm : value) { m_stat->add(elm); } }
+     void operator()(const std::vector<std::vector<T_Value> > &value) { for( const auto &elm : value) { this->operator()(elm); } }
+     Stat *m_stat;
+  };
+
   struct ParticleContainer {
      static constexpr unsigned int kNParticlesMax = 15000;
      std::vector<int>     pdgId;
@@ -181,10 +213,71 @@ class RootDigiBase {
         e.clear();
         m.clear();
      }
+     enum EStat {
+        kStat_pdgId,
+        kStat_barcode,
+        kStat_status,
+        kStat_n_prodVtxLink,
+        kStat_prodVtxLink_m_persIndex,
+        kStat_n_decayVtxLink,
+        kStat_decayVtxLink_m_persKey,
+        kStat_decayVtxLink_m_persIndex,
+        kStat_px,
+        kStat_py,
+        kStat_pz,
+        kStat_e,
+        kStat_m,
+        kNStat
+     };
+     void fillStat(std::vector<std::pair<std::string, Stat> > &stat) {
+        if (stat.empty()) {
+           stat.reserve(kNStat);
+           stat.push_back(std::make_pair(std::string("pdgId"),Stat()));
+           stat.push_back(std::make_pair(std::string("barcode"),Stat()));
+           stat.push_back(std::make_pair(std::string("status"),Stat()));
+           stat.push_back(std::make_pair(std::string("n_prodVtxLink"),Stat()));
+           stat.push_back(std::make_pair(std::string("prodVtxLink_m_persIndex"),Stat()));
+           stat.push_back(std::make_pair(std::string("n_decayVtxLink"),Stat()));
+           stat.push_back(std::make_pair(std::string("decayVtxLink_m_persKey"),Stat()));
+           stat.push_back(std::make_pair(std::string("decayVtxLink_m_persIndex"),Stat()));
+           stat.push_back(std::make_pair(std::string("px"),Stat()));
+           stat.push_back(std::make_pair(std::string("py"),Stat()));
+           stat.push_back(std::make_pair(std::string("pz"),Stat()));
+           stat.push_back(std::make_pair(std::string("e"),Stat()));
+           stat.push_back(std::make_pair(std::string("m"),Stat()));
+        }
+        if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
+        std::for_each(pdgId.begin(),pdgId.end(),StatFiller<int>(stat[kStat_pdgId].second));
+        std::for_each(barcode.begin(),barcode.end(),StatFiller<int>(stat[kStat_barcode].second));
+        std::for_each(status.begin(),status.end(),StatFiller<int>(stat[kStat_status].second));
+        stat[kStat_n_prodVtxLink].second.add(n_prodVtxLink);
+        if (n_prodVtxLink>0) {
+           for (unsigned int i=0; i<std::min(static_cast<unsigned int>(n_prodVtxLink),kNParticlesMax); ++i ) {
+              stat[kStat_prodVtxLink_m_persIndex].second.add(prodVtxLink_m_persIndex[i]);
+           }
+        }
+        stat[kStat_n_decayVtxLink].second.add(n_decayVtxLink);
+        if (n_decayVtxLink>0) {
+           for (unsigned int i=0; i<std::min(static_cast<unsigned int>(n_decayVtxLink),kNParticlesMax); ++i ) {
+              stat[kStat_decayVtxLink_m_persIndex].second.add(decayVtxLink_m_persIndex[i]);
+           }
+        }
+     // Int_t           n_prodVtxLink = 0;
+     // // UInt_t          TruthParticlesAux_prodVtxLink_m_persKey[1];   //[TruthParticlesAux.prodVtxLink_]
+     // UInt_t          prodVtxLink_m_persIndex[kNParticlesMax];   //[TruthParticlesAux.prodVtxLink_]
+     // Int_t           n_decayVtxLink = 0;
+     // //UInt_t          decayVtxLink_m_persKey[kMaxTruthParticlesAux_decayVtxLink];   //[TruthParticlesAux.decayVtxLink_]
+     // UInt_t          decayVtxLink_m_persIndex[kNParticlesMax];   //[TruthParticlesAux.decayVtxLink_]
+        std::for_each(px.begin(),px.end(),StatFiller<float>(stat[kStat_px].second));
+        std::for_each(py.begin(),py.end(),StatFiller<float>(stat[kStat_py].second));
+        std::for_each(pz.begin(),pz.end(),StatFiller<float>(stat[kStat_pz].second));
+        std::for_each(e.begin(),e.end(),StatFiller<float>(stat[kStat_e].second));
+        std::for_each(m.begin(),m.end(),StatFiller<float>(stat[kStat_m].second));
+     }
   };
   struct ParticleVertexContainer {
      //     std::vector<int>     id;
-     std::vector<int>     barcode; 
+     std::vector<int>     barcode;
      //     std::vector<std::vector<ElementLink<DataStd::Vector<xAOD::TruthParticle_v1> > > > TruthVerticesAux_incomingParticleLinks;
      //     std::vector<std::vector<ElementLink<DataStd::Vector<xAOD::TruthParticle_v1> > > > TruthVerticesAux_outgoingParticleLinks;
      std::vector<float>   x;
@@ -210,6 +303,31 @@ class RootDigiBase {
         x.clear();
         y.clear();
         z.clear();
+        t.clear();
+     }
+     enum EStat  {
+        kStat_barcode,
+        kStat_x,
+        kStat_y,
+        kStat_z,
+        kStat_t,
+        kNStat
+     };
+     void fillStat(std::vector<std::pair<std::string, Stat> > &stat) {
+        if (stat.empty()) {
+           stat.reserve(kNStat);
+           stat.push_back(std::make_pair(std::string("barcode"),Stat()));
+           stat.push_back(std::make_pair(std::string("x"),Stat()));
+           stat.push_back(std::make_pair(std::string("y"),Stat()));
+           stat.push_back(std::make_pair(std::string("z"),Stat()));
+           stat.push_back(std::make_pair(std::string("t"),Stat()));
+        }
+        if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
+        std::for_each(barcode.begin(),barcode.end(),StatFiller<int>(stat[kStat_barcode].second));
+        std::for_each(x.begin(),x.end(),StatFiller<float>(stat[kStat_x].second));
+        std::for_each(y.begin(),y.end(),StatFiller<float>(stat[kStat_y].second));
+        std::for_each(z.begin(),z.end(),StatFiller<float>(stat[kStat_z].second));
+        std::for_each(t.begin(),t.end(),StatFiller<float>(stat[kStat_t].second));
      }
   };
   struct ClusterContainer {
@@ -221,17 +339,17 @@ class RootDigiBase {
      std::vector<float>    *globalX = nullptr;
      std::vector<float>    globalY;
      std::vector<float>    globalZ;
-     std::vector<unsigned long> detectorElementID;
+     std::vector<unsigned long> *detectorElementID = nullptr;
      void reserve(std::size_t new_capacity) {
         localX.reserve(new_capacity);
         localY.reserve(new_capacity);
         localXError.reserve(new_capacity);
         localYError.reserve(new_capacity);
         localXYCorrelation.reserve(new_capacity);
-        globalX.reserve(new_capacity);
+        if (globalX) globalX->reserve(new_capacity);
         globalY.reserve(new_capacity);
         globalZ.reserve(new_capacity);
-        detectorElementID.reserve(new_capacity);
+        if (detectorElementID) detectorElementID->reserve(new_capacity);
      }
      void push_back(float a_localX, float a_localY, float a_localXError, float a_localYError, float a_localXYCorrelation,
                     float a_globalX, float a_globalY, float a_globalZ, unsigned long a_detectorElementID) {
@@ -240,10 +358,10 @@ class RootDigiBase {
         localXError.push_back(a_localXError);
         localYError.push_back(a_localYError);
         localXYCorrelation.push_back(a_localXYCorrelation);
-        globalX.push_back(a_globalX);
+        if (globalX) globalX->push_back(a_globalX);
         globalY.push_back(a_globalY);
         globalZ.push_back(a_globalZ);
-        detectorElementID.push_back(a_detectorElementID);
+        if (detectorElementID) detectorElementID->push_back(a_detectorElementID);
      }
      void clear() {
         localX.clear();
@@ -251,10 +369,46 @@ class RootDigiBase {
         localXError.clear();
         localYError.clear();
         localXYCorrelation.clear();
-        globalX.clear();
+        if (globalX) globalX->clear();
         globalY.clear();
         globalZ.clear();
-        detectorElementID.clear();
+        detectorElementID->clear();
+     }
+     enum EStat  {
+        kStat_localX,
+        kStat_localY,
+        kStat_localXError,
+        kStat_localYError,
+        kStat_localXYCorrelation,
+        kStat_globalX,
+        kStat_globalY,
+        kStat_globalZ,
+        kStat_detectorElementID,
+        kNStat
+     };
+     void fillStat(std::vector<std::pair<std::string, Stat> > &stat) {
+        if (stat.empty()) {
+           stat.reserve(kNStat);
+           stat.push_back(std::make_pair(std::string("localX"),Stat()));
+           stat.push_back(std::make_pair(std::string("localY"),Stat()));
+           stat.push_back(std::make_pair(std::string("localXError"),Stat()));
+           stat.push_back(std::make_pair(std::string("localYError"),Stat()));
+           stat.push_back(std::make_pair(std::string("localXYCorrelation"),Stat()));
+           stat.push_back(std::make_pair(std::string("globalX"),Stat()));
+           stat.push_back(std::make_pair(std::string("globalY"),Stat()));
+           stat.push_back(std::make_pair(std::string("globalZ"),Stat()));
+           stat.push_back(std::make_pair(std::string("detectorElementID"),Stat()));
+        }
+        if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
+        std::for_each(localX.begin(),localX.end(),StatFiller<float>(stat[kStat_localX].second));
+        std::for_each(localY.begin(),localY.end(),StatFiller<float>(stat[kStat_localY].second));
+        std::for_each(localXError.begin(),localXError.end(),StatFiller<float>(stat[kStat_localXError].second));
+        std::for_each(localYError.begin(),localYError.end(),StatFiller<float>(stat[kStat_localYError].second));
+        std::for_each(localXYCorrelation.begin(),localXYCorrelation.end(),StatFiller<float>(stat[kStat_localXYCorrelation].second));
+        std::for_each(globalX->begin(),globalX->end(),StatFiller<float>(stat[kStat_globalX].second));
+        std::for_each(globalY.begin(),globalY.end(),StatFiller<float>(stat[kStat_globalY].second));
+        std::for_each(globalZ.begin(),globalZ.end(),StatFiller<float>(stat[kStat_globalZ].second));
+        std::for_each(detectorElementID->begin(),detectorElementID->end(),StatFiller<long>(stat[kStat_detectorElementID].second));
      }
   };
   struct SDOInfoContainer {
@@ -281,6 +435,24 @@ class RootDigiBase {
         if (sim_depositsBarcode) sim_depositsBarcode->clear();
         if (sim_depositsEnergy)  sim_depositsEnergy->clear();
      }
+     enum EStat  {
+        kStat_sdo_words,
+        kStat_sim_depositsBarcode,
+        kStat_sim_depositsEnergy,
+        kNStat
+     };
+     void fillStat(std::vector<std::pair<std::string, Stat> > &stat) {
+        if (stat.empty()) {
+           stat.reserve(kNStat);
+           stat.push_back(std::make_pair(std::string("sdo_words"),Stat()));
+           stat.push_back(std::make_pair(std::string("sim_depositsBarcode"),Stat()));
+           stat.push_back(std::make_pair(std::string("sim_depositsEnergy"),Stat()));
+        }
+        if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
+        std::for_each(sdo_words->begin(),sdo_words->end(),StatFiller<int>(stat[kStat_sdo_words].second));
+        std::for_each(sim_depositsBarcode->begin(),sim_depositsBarcode->end(),StatFiller<int>(stat[kStat_sim_depositsBarcode].second));
+        std::for_each(sim_depositsEnergy->begin(),sim_depositsEnergy->end(),StatFiller<float>(stat[kStat_sim_depositsEnergy].second));
+     }
   };
   struct PixelContainer {
    std::vector<std::vector<int> >   *loc0idx = nullptr;
@@ -305,6 +477,27 @@ class RootDigiBase {
         if (loc1idx) loc1idx->clear();
         if (charge) charge->clear();
         if (waferID) waferID->clear();
+     }
+     enum EStat  {
+        kStat_loc0idx,
+        kStat_loc1idx,
+        kStat_charge,
+        kStat_waferID,
+        kNStat
+     };
+     void fillStat(std::vector<std::pair<std::string, Stat> > &stat) {
+        if (stat.empty()) {
+           stat.reserve(kNStat);
+           stat.push_back(std::make_pair(std::string("loc0idx"),Stat()));
+           stat.push_back(std::make_pair(std::string("loc1idx"),Stat()));
+           stat.push_back(std::make_pair(std::string("charge"),Stat()));
+           stat.push_back(std::make_pair(std::string("waferID"),Stat()));
+        }
+        if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
+        std::for_each(loc0idx->begin(),loc0idx->end(),StatFiller<int>(stat[kStat_loc0idx].second));
+        std::for_each(loc1idx->begin(),loc1idx->end(),StatFiller<int>(stat[kStat_loc1idx].second));
+        std::for_each(charge->begin(),charge->end(),StatFiller<float>(stat[kStat_charge].second));
+        std::for_each(waferID->begin(),waferID->end(),StatFiller<int>(stat[kStat_waferID].second));
      }
   };
 
@@ -340,6 +533,33 @@ class RootDigiBase {
         if (timebin) timebin->clear();
         if (groupsize) groupsize->clear();
      }
+     enum EStat  {
+        kStat_SiWidth,
+        kStat_hitsInThirdTimeBin,
+        kStat_side,
+        kStat_strip,
+        kStat_timebin,
+        kStat_groupsize,
+        kNStat
+     };
+     void fillStat(std::vector<std::pair<std::string, Stat> > &stat) {
+        if (stat.empty()) {
+           stat.reserve(kNStat);
+           stat.push_back(std::make_pair(std::string("SiWidth"),Stat()));
+           stat.push_back(std::make_pair(std::string("hitsInThirdTimeBin"),Stat()));
+           stat.push_back(std::make_pair(std::string("side"),Stat()));
+           stat.push_back(std::make_pair(std::string("strip"),Stat()));
+           stat.push_back(std::make_pair(std::string("timebin"),Stat()));
+           stat.push_back(std::make_pair(std::string("groupsize"),Stat()));
+        }
+        if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
+        std::for_each(SiWidth->begin(),SiWidth->end(),StatFiller<int>(stat[kStat_SiWidth].second));
+        std::for_each(hitsInThirdTimeBin->begin(),hitsInThirdTimeBin->end(),StatFiller<int>(stat[kStat_hitsInThirdTimeBin].second));
+        std::for_each(side->begin(),side->end(),StatFiller<int>(stat[kStat_side].second));
+        std::for_each(strip->begin(),strip->end(),StatFiller<int>(stat[kStat_strip].second));
+        std::for_each(timebin->begin(),timebin->end(),StatFiller<int>(stat[kStat_timebin].second));
+        std::for_each(groupsize->begin(),groupsize->end(),StatFiller<int>(stat[kStat_groupsize].second));
+     }
   };
 
   EventInfo               m_eventInfo;
@@ -371,6 +591,7 @@ protected:
   void connectSDOs(const std::string &prefix, ActsExamples::RootDigiBase::SDOInfoContainer &sdos);
 
   std::vector<std::function<void() > > m_cleanup;
+  std::vector<std::pair< std::string, std::vector<std::pair<std::string, Stat>  > > > m_stat;
 };
 
 class RootDigiWriter : public RootDigiBase, public virtual IWriter {
@@ -391,13 +612,14 @@ public:
      struct Config : public ConfigBase {};
      RootDigiReader();
      RootDigiReader(Config cfg, Acts::Logging::Level lvl);
-     ~RootDigiReader() { endRunBase(); }
+     ~RootDigiReader() { showStat(); endRunBase(); }
 
      std::string name() const override { return "RootDigiReader"; };
 
      std::pair<size_t, size_t> availableEvents() const override;
 
      ProcessCode read(const AlgorithmContext& context)  override;
+     void showStat() const;
 };
 
 inline TLeaf *ActsExamples::RootDigiBase::getLeaf(std::string leaf_name ) const {
@@ -471,7 +693,7 @@ inline void ActsExamples::RootDigiBase::connectBranch(std::string branch_name, T
                       << " ]"
                       << " leaf " << the_leaf->GetTypeName() << " " << (leaf_class ? leaf_class->GetCheckSum() : 0u)
                       << " desired " <<  the_class->GetName() << std::endl;
-            if (the_class->GetName() != the_leaf->GetTypeName() ) {
+            if ( strcmp(the_class->GetName(),the_leaf->GetTypeName()) != 0 ) {
                TVirtualStreamerInfo *converter = the_class->GetConversionStreamerInfo(the_leaf->GetTypeName(),
                                                                                       the_class->GetClassVersion());
                if (!converter) {
@@ -485,7 +707,7 @@ inline void ActsExamples::RootDigiBase::connectBranch(std::string branch_name, T
             // check whether a pointer to a pointer to the object or just a pointer to the object is expected
             // (note T is a pointer to the object)
             if constexpr(std::is_pointer<T>()) {
-                  if (the_branch->GetClassName() == the_leaf->GetTypeName()) {
+                  if (strcmp( the_branch->GetClassName(), the_leaf->GetTypeName()) == 0) {
                      m_tree->SetBranchAddress(the_branch->GetName(), adr, &branch_addr);
                   }
                   else {
@@ -498,9 +720,15 @@ inline void ActsExamples::RootDigiBase::connectBranch(std::string branch_name, T
             branch_addr=the_branch;
          }
          else {
-            if (a_branch->GetNleaves()==1 && a_branch->IsA() == TBranchElement::Class()) {
-               TBranchElement *branch_element = static_cast<TBranchElement*>(a_branch);
-               if (branch_element->GetType() == the_type()) {
+            if (the_branch->GetNleaves()==1 && the_branch->IsA() == TBranchElement::Class()) {
+               TBranchElement *branch_element = static_cast<TBranchElement*>(the_branch);
+               std::cout << "DEBUG branch type " << branch_element->GetTypeName() << " ["
+                         << branch_element->GetNleaves()
+                         << " ]"
+                         << " leaf " << the_leaf->GetTypeName() 
+                         << " desired " <<  the_type << " " << TDataType::GetTypeName(the_type) << std::endl;
+               if (std::string(branch_element->GetTypeName()) == TDataType::GetTypeName(the_type)) {
+                  m_tree->SetBranchStatus(the_branch->GetName(),1);
                   m_tree->SetBranchAddress(the_branch->GetName(), adr, &branch_addr);
                }
             }

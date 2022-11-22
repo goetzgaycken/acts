@@ -302,7 +302,7 @@ void addOutput(Context& ctx) {
                              particles,measurements,measurementParticlesMap,filePath,fileMode,
                              treeName,truthParticlePrefix,truthVertexPrefix,
                              eventInfoPrefix,measurementPrefix,measurementType,
-                             trackingGeometry);
+                             trackingGeometry, stop);
   // CSV WRITERS
   ACTS_PYTHON_DECLARE_WRITER(ActsExamples::CsvParticleWriter, mex,
                              "CsvParticleWriter", inputParticles, outputDir,

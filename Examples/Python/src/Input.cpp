@@ -52,7 +52,7 @@ void addInput(Context& ctx) {
                              particles,measurements,measurementParticlesMap,filePath,fileMode,
                              treeName,truthParticlePrefix,truthVertexPrefix,
                              eventInfoPrefix,measurementPrefix,measurementType,
-                             trackingGeometry);
+                             trackingGeometry, stop);
 
   // CSV READERS
   ACTS_PYTHON_DECLARE_READER(ActsExamples::CsvParticleReader, mex,
