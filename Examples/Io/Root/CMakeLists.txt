@@ -20,7 +20,6 @@ add_library(
   src/RootBFieldWriter.cpp
   src/RootDigiBase.cpp
 )
-
 target_include_directories(
   ActsExamplesIoRoot
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -35,5 +34,3 @@ target_link_libraries(
 install(
   TARGETS ActsExamplesIoRoot
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
-
-root_generate_dictionary(ActsExamplesIoRootDict  MODULE ActsExamplesIoRoot LINKDEF src/ActsExamplesIoRootLinkDef.h)
