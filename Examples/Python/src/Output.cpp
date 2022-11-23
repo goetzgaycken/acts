@@ -299,7 +299,7 @@ void addOutput(Context& ctx) {
 
   ACTS_PYTHON_DECLARE_WRITER(ActsExamples::RootDigiWriter, mex,
                              "RootDigiWriter",
-                             particles,measurements,measurementParticlesMap,filePath,fileMode,
+                             particles,sourceLinks,measurements,measurementParticlesMap,filePath,fileMode,
                              treeName,truthParticlePrefix,truthVertexPrefix,
                              eventInfoPrefix,measurementPrefix,measurementType,
                              trackingGeometry, stop);

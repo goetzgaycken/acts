@@ -12,6 +12,7 @@
 #include "ActsExamples/Framework/IWriter.hpp"
 #include "Acts/Utilities/Logger.hpp"
 #include "Acts/Geometry/TrackingGeometry.hpp"
+#include "ActsFatras/EventData/Barcode.hpp"
 
 #include <cstdint>
 #include <mutex>
@@ -49,6 +50,8 @@ class RootDigiBase {
   struct ConfigBase {
     /// truth particle collection to write.
     std::string particles = "particles_final";
+    ///  name of the sourceLink collection (Reader)
+    std::string sourceLinks = "sourcelinks";
     /// name of the measurements collection
     std::string measurements = "measurements";
     /// name for the map between measurements and truth particles
@@ -153,7 +156,16 @@ class RootDigiBase {
      void operator()(const std::vector<std::vector<T_Value> > &value) { for( const auto &elm : value) { this->operator()(elm); } }
      Stat *m_stat;
   };
-
+   static void checkDimensions( std::size_t a, std::size_t b, std::size_t max_dim= std::numeric_limits<std::size_t>::max()) {
+      if (a != b || b>=max_dim) {
+         throw std::runtime_error("Branch dimension mismatch");
+      }
+   }
+   static void checkPointer(const void *ptr) {
+      if (!ptr) {
+         throw std::runtime_error("invalid pointer");
+      }
+   }
   struct ParticleContainer {
      static constexpr unsigned int kNParticlesMax = 15000;
      std::vector<int>     pdgId;
@@ -170,6 +182,17 @@ class RootDigiBase {
      std::vector<float>   pz;
      std::vector<float>   e;
      std::vector<float>   m;
+     void checkDimensions() const {
+        RootDigiBase::checkDimensions( pdgId.size(), barcode.size() );
+        RootDigiBase::checkDimensions( pdgId.size(), status.size() );
+        RootDigiBase::checkDimensions( pdgId.size(), n_prodVtxLink,  kNParticlesMax );
+        RootDigiBase::checkDimensions( pdgId.size(), n_decayVtxLink,  kNParticlesMax );
+        RootDigiBase::checkDimensions( pdgId.size(), px.size() );
+        RootDigiBase::checkDimensions( pdgId.size(), py.size() );
+        RootDigiBase::checkDimensions( pdgId.size(), pz.size() );
+        RootDigiBase::checkDimensions( pdgId.size(), e.size() );
+        RootDigiBase::checkDimensions( pdgId.size(), m.size() );
+     }
      void reserve(std::size_t new_capacity) {
         pdgId.reserve(new_capacity);
         barcode.reserve(new_capacity);
@@ -284,6 +307,11 @@ class RootDigiBase {
      std::vector<float>   y;
      std::vector<float>   z;
      std::vector<float>   t;
+     void checkDimensions() const {
+        RootDigiBase::checkDimensions( x.size(), y.size() );
+        RootDigiBase::checkDimensions( x.size(), z.size() );
+        RootDigiBase::checkDimensions( x.size(), t.size() );
+     }
      void reserve(std::size_t new_capacity) {
         barcode.reserve(new_capacity);
         x.reserve(new_capacity);
@@ -331,48 +359,79 @@ class RootDigiBase {
      }
   };
   struct ClusterContainer {
-     std::vector<float>    localX;
-     std::vector<float>    localY;
-     std::vector<float>    localXError;
-     std::vector<float>    localYError;
-     std::vector<float>    localXYCorrelation;
+     ~ ClusterContainer() {
+        delete localX;
+        delete localY;
+        delete localXError;
+        delete localYError;
+        delete localXYCorrelation;
+        delete globalX;
+        delete globalY;
+        delete globalZ;
+        delete detectorElementID;
+     }
+     std::vector<float>    *localX = nullptr;
+     std::vector<float>    *localY = nullptr;
+     std::vector<float>    *localXError = nullptr;
+     std::vector<float>    *localYError = nullptr;
+     std::vector<float>    *localXYCorrelation = nullptr;
      std::vector<float>    *globalX = nullptr;
-     std::vector<float>    globalY;
-     std::vector<float>    globalZ;
+     std::vector<float>    *globalY = nullptr;
+     std::vector<float>    *globalZ = nullptr;
      std::vector<unsigned long> *detectorElementID = nullptr;
+     
+     void checkDimensions() const {
+        RootDigiBase::checkPointer(localX);
+        RootDigiBase::checkPointer(localY);
+        RootDigiBase::checkPointer(localXError);
+        RootDigiBase::checkPointer(localYError);
+        RootDigiBase::checkPointer(localXYCorrelation);
+        RootDigiBase::checkPointer(globalX);
+        RootDigiBase::checkPointer(globalY);
+        RootDigiBase::checkPointer(globalZ);
+        RootDigiBase::checkPointer(detectorElementID);
+        RootDigiBase::checkDimensions( localX->size(), localY->size() );
+        RootDigiBase::checkDimensions( localX->size(), localXError->size() );
+        RootDigiBase::checkDimensions( localX->size(), localYError->size() );
+        RootDigiBase::checkDimensions( localX->size(), localXYCorrelation->size() );
+        RootDigiBase::checkDimensions( localX->size(), globalX->size() );
+        RootDigiBase::checkDimensions( localX->size(), globalY->size() );
+        RootDigiBase::checkDimensions( localX->size(), globalZ->size() );
+        RootDigiBase::checkDimensions( localX->size(), detectorElementID->size() );
+     }
      void reserve(std::size_t new_capacity) {
-        localX.reserve(new_capacity);
-        localY.reserve(new_capacity);
-        localXError.reserve(new_capacity);
-        localYError.reserve(new_capacity);
-        localXYCorrelation.reserve(new_capacity);
+        if (localX) localX->reserve(new_capacity);
+        if (localY) localY->reserve(new_capacity);
+        if (localXError) localXError->reserve(new_capacity);
+        if (localYError) localYError->reserve(new_capacity);
+        if (localXYCorrelation) localXYCorrelation->reserve(new_capacity);
         if (globalX) globalX->reserve(new_capacity);
-        globalY.reserve(new_capacity);
-        globalZ.reserve(new_capacity);
+        if (globalY) globalY->reserve(new_capacity);
+        if (globalZ) globalZ->reserve(new_capacity);
         if (detectorElementID) detectorElementID->reserve(new_capacity);
      }
      void push_back(float a_localX, float a_localY, float a_localXError, float a_localYError, float a_localXYCorrelation,
                     float a_globalX, float a_globalY, float a_globalZ, unsigned long a_detectorElementID) {
-        localX.push_back(a_localX);
-        localY.push_back(a_localY);
-        localXError.push_back(a_localXError);
-        localYError.push_back(a_localYError);
-        localXYCorrelation.push_back(a_localXYCorrelation);
+        if (localX) localX->push_back(a_localX);
+        if (localY) localY->push_back(a_localY);
+        if (localXError) localXError->push_back(a_localXError);
+        if (localYError) localYError->push_back(a_localYError);
+        if (localXYCorrelation) localXYCorrelation->push_back(a_localXYCorrelation);
         if (globalX) globalX->push_back(a_globalX);
-        globalY.push_back(a_globalY);
-        globalZ.push_back(a_globalZ);
+        if (globalY) globalY->push_back(a_globalY);
+        if (globalZ) globalZ->push_back(a_globalZ);
         if (detectorElementID) detectorElementID->push_back(a_detectorElementID);
      }
      void clear() {
-        localX.clear();
-        localY.clear();
-        localXError.clear();
-        localYError.clear();
-        localXYCorrelation.clear();
+        if (localX) localX->clear();
+        if (localY) localY->clear();
+        if (localXError) localXError->clear();
+        if (localYError) localYError->clear();
+        if (localXYCorrelation) localXYCorrelation->clear();
         if (globalX) globalX->clear();
-        globalY.clear();
-        globalZ.clear();
-        detectorElementID->clear();
+        if (globalY) globalY->clear();
+        if (globalZ) globalZ->clear();
+        if (detectorElementID) detectorElementID->clear();
      }
      enum EStat  {
         kStat_localX,
@@ -400,21 +459,34 @@ class RootDigiBase {
            stat.push_back(std::make_pair(std::string("detectorElementID"),Stat()));
         }
         if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
-        std::for_each(localX.begin(),localX.end(),StatFiller<float>(stat[kStat_localX].second));
-        std::for_each(localY.begin(),localY.end(),StatFiller<float>(stat[kStat_localY].second));
-        std::for_each(localXError.begin(),localXError.end(),StatFiller<float>(stat[kStat_localXError].second));
-        std::for_each(localYError.begin(),localYError.end(),StatFiller<float>(stat[kStat_localYError].second));
-        std::for_each(localXYCorrelation.begin(),localXYCorrelation.end(),StatFiller<float>(stat[kStat_localXYCorrelation].second));
+        std::for_each(localX->begin(),localX->end(),StatFiller<float>(stat[kStat_localX].second));
+        std::for_each(localY->begin(),localY->end(),StatFiller<float>(stat[kStat_localY].second));
+        std::for_each(localXError->begin(),localXError->end(),StatFiller<float>(stat[kStat_localXError].second));
+        std::for_each(localYError->begin(),localYError->end(),StatFiller<float>(stat[kStat_localYError].second));
+        std::for_each(localXYCorrelation->begin(),localXYCorrelation->end(),StatFiller<float>(stat[kStat_localXYCorrelation].second));
         std::for_each(globalX->begin(),globalX->end(),StatFiller<float>(stat[kStat_globalX].second));
-        std::for_each(globalY.begin(),globalY.end(),StatFiller<float>(stat[kStat_globalY].second));
-        std::for_each(globalZ.begin(),globalZ.end(),StatFiller<float>(stat[kStat_globalZ].second));
+        std::for_each(globalY->begin(),globalY->end(),StatFiller<float>(stat[kStat_globalY].second));
+        std::for_each(globalZ->begin(),globalZ->end(),StatFiller<float>(stat[kStat_globalZ].second));
         std::for_each(detectorElementID->begin(),detectorElementID->end(),StatFiller<long>(stat[kStat_detectorElementID].second));
      }
   };
   struct SDOInfoContainer {
-   std::vector<std::vector<int> >                 *sdo_words = nullptr;
-   std::vector<std::vector<std::vector<int> > >   *sim_depositsBarcode = nullptr;  // @TODO should be uint64 (schema evolution? )
-   std::vector<std::vector<std::vector<float> > > *sim_depositsEnergy = nullptr;
+     std::vector<std::vector<int> >                 *sdo_words = nullptr;
+     std::vector<std::vector<std::vector<int> > >   *sim_depositsBarcode = nullptr;  // @TODO should be uint64 (schema evolution? )
+     std::vector<std::vector<std::vector<float> > > *sim_depositsEnergy = nullptr;
+     ~SDOInfoContainer() {
+        delete sdo_words;
+        delete sim_depositsBarcode;
+        delete sim_depositsEnergy;
+     }
+     void checkDimensions(std::size_t measurement_size) const {
+        RootDigiBase::checkPointer(sdo_words);
+        RootDigiBase::checkPointer(sim_depositsEnergy);
+        RootDigiBase::checkPointer(sim_depositsBarcode);
+        RootDigiBase::checkDimensions(sdo_words->size(), measurement_size);
+        RootDigiBase::checkDimensions(sdo_words->size(), sim_depositsBarcode->size());
+        RootDigiBase::checkDimensions(sdo_words->size(), sim_depositsEnergy->size());
+     }
      void reserve(std::size_t new_capacity) {
         if (sdo_words) sdo_words->reserve(new_capacity);
         if (sim_depositsBarcode) sim_depositsBarcode->reserve(new_capacity);
@@ -423,12 +495,12 @@ class RootDigiBase {
      void push_back(std::vector< int> &&a_sdo_words,
                     std::vector<std::vector< int> > &&a_sim_depositsBarcode,
                     std::vector<std::vector<float> > &&a_sim_depositsEnergy ) {
-        assert( a_sdo_words.size() == a_sim_depositsEnergy.size() && a_sim_depositsEnergy.size() == a_sim_depositsBarcode.size());
-        assert(    std::accumulate(a_sim_depositsBarcode.begin(),a_sim_depositsBarcode.begin(),0u,[](auto &elm) { return elm.size(); })
-                == std::accumulate(a_sim_depositsEnergy.begin(), a_sim_depositsEnergy.begin(), 0u,[](auto &elm) { return elm.size(); }) );
-        sdo_words->push_back(std::move(a_sdo_words));
-        sim_depositsBarcode->push_back(std::move(a_sim_depositsBarcode));
-        sim_depositsEnergy->push_back(std::move(a_sim_depositsEnergy));
+        assert( a_sdo_words->size() == a_sim_depositsEnergy->size() && a_sim_depositsEnergy->size() == a_sim_depositsBarcode->size());
+        assert(    std::accumulate(a_sim_depositsBarcode->begin(),a_sim_depositsBarcode->end(),0u,[](auto &elm) { return elm.size(); })
+                == std::accumulate(a_sim_depositsEnergy->begin(), a_sim_depositsEnergy->end(), 0u,[](auto &elm) { return elm.size(); }) );
+        if (sdo_words)           sdo_words->push_back(std::move(a_sdo_words));
+        if (sim_depositsBarcode) sim_depositsBarcode->push_back(std::move(a_sim_depositsBarcode));
+        if (sim_depositsBarcode) sim_depositsEnergy->push_back(std::move(a_sim_depositsEnergy));
      }
      void clear() {
         if (sdo_words) sdo_words->clear();
@@ -619,6 +691,10 @@ public:
      std::pair<size_t, size_t> availableEvents() const override;
 
      ProcessCode read(const AlgorithmContext& context)  override;
+
+     std::map<int, ActsFatras::Barcode> convertParticles(const AlgorithmContext& ctx);
+     void convertMeasurements(const AlgorithmContext& ctx, const std::map<int, ActsFatras::Barcode> &barcode_map);
+
      void showStat() const;
 };
 
@@ -694,8 +770,9 @@ inline void ActsExamples::RootDigiBase::connectBranch(std::string branch_name, T
                       << " leaf " << the_leaf->GetTypeName() << " " << (leaf_class ? leaf_class->GetCheckSum() : 0u)
                       << " desired " <<  the_class->GetName() << std::endl;
             if ( strcmp(the_class->GetName(),the_leaf->GetTypeName()) != 0 ) {
-               TVirtualStreamerInfo *converter = the_class->GetConversionStreamerInfo(the_leaf->GetTypeName(),
-                                                                                      the_class->GetClassVersion());
+               // streamer evolution not executed if branches are switched to SetMakeClass(1) with is necessary for AODs 
+               TVirtualStreamerInfo *converter = nullptr /* the_class->GetConversionStreamerInfo(the_leaf->GetTypeName(),
+                                                            the_class->GetClassVersion()) */;
                if (!converter) {
                   ACTS_ERROR("No converter for " << branch_name << " from "
                              << the_leaf->GetTypeName() << " to " << the_class->GetName());

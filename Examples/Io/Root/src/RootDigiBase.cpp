@@ -20,14 +20,20 @@ namespace ActsExamples {
 using HitParticlesMap = IndexMultimap<ActsFatras::Barcode>;
 }
 
+#include "Acts/EventData/SourceLink.hpp"
+
+
 #include <ios>
 #include <stdexcept>
+#include <list>
 #include <signal.h>
 #include <unistd.h>
 
 #include "TFile.h"
 #include "TTree.h"
 #include "TBranch.h"
+
+#define DEBUG_READ 1
 
 ActsExamples::RootDigiBase::RootDigiBase(
     ActsExamples::RootDigiBase::ConfigBase cfg,
@@ -79,7 +85,7 @@ ActsExamples::RootDigiBase::RootDigiBase(
   else {
      // initially disable all branches, then enable all used branches
      m_tree->SetBranchStatus("*",0);
-     m_tree->SetMakeClass(1);
+     //     m_tree->SetMakeClass(1);
   }
 
   if (m_cfg.stop) {
@@ -406,7 +412,7 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
        }
     }
     
-
+# ifdef DEBUG_READ
     std::cout << "DEBUG " << name() << " " << m_eventInfo.eventNumber
               << " barcode=" << m_truthParticles.barcode.size() << " (" << static_cast<const void *>(&m_truthParticles.barcode) << ") "
               << " globalX=" << m_clusters[kPixel].globalX->size()  << " (" << static_cast<const void *>(m_clusters[kPixel].globalX) << ") "
@@ -433,11 +439,209 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
     }
     }
     if (counter>0) std::cout << std::endl;
+# endif
 
-    // std::cout <<"DEBUG " << name() << " wait for CONT " << getpid() << std::endl;
-    // kill (getpid(), SIGSTOP);
+  std::map<int, ActsFatras::Barcode>  barcode_map = convertParticles(ctx);
+  convertMeasurements(ctx, barcode_map);
   return ProcessCode::SUCCESS;
 }
+
+std::map<int, ActsFatras::Barcode> ActsExamples::RootDigiReader::convertParticles(const AlgorithmContext& ctx) {
+  SimParticleContainer particles;
+  m_truthParticles.checkDimensions();
+  m_truthVertices.checkDimensions();
+  std::map<int, ActsFatras::Barcode> barcode_map;
+  for (unsigned int particle_i = 0; particle_i < m_truthParticles.pdgId.size(); ++particle_i) {
+     // somehow map the input barcode and vertex index to the ActsFatras::Barcode 
+     unsigned int vertex_i = (m_truthParticles.n_prodVtxLink>0 && particle_i < static_cast<unsigned int>(m_truthParticles.n_prodVtxLink)
+                              ? m_truthParticles.prodVtxLink_m_persIndex[ particle_i ]
+                              : std::numeric_limits<unsigned int>::max() );
+     if  (vertex_i & 0xff000000) {
+        if (m_truthParticles.n_prodVtxLink<=0 || particle_i >= static_cast<unsigned int>(m_truthParticles.n_prodVtxLink))  {
+           ACTS_ERROR("No vertex for  " << particle_i << " !< " << m_truthParticles.n_prodVtxLink << " -> " << (vertex_i & 0xffffff) );
+        }
+        else {
+           ACTS_ERROR("Precision loss for vertex index of particle " << particle_i << " : " << vertex_i
+                      << " -> " << (vertex_i & 0xffffff) );
+        }
+     }
+     
+     const auto pid = ActsFatras::Barcode(0u)
+        .setParticle(m_truthParticles.barcode.at(particle_i) & 0xffff)
+        .setSubParticle((m_truthParticles.barcode.at(particle_i)>>16) & 0xffff)
+        .setVertexPrimary( (vertex_i & 0xfff) )
+        .setVertexSecondary( ((vertex_i>>12) & 0xfff) );
+
+     std::pair<std::map<int, ActsFatras::Barcode>::const_iterator, bool>
+        insert_result =  barcode_map.insert( std::make_pair(m_truthParticles.barcode.at(particle_i), pid) );
+     if (!insert_result.second) {
+        ACTS_ERROR("Barcode " << m_truthParticles.barcode.at(particle_i) << " not unique. Old dest : " << insert_result.first->second
+                   << " New dest " << pid);
+     }
+     //  set vertix part
+     ActsFatras::Particle particle(pid,
+                                   Acts::PdgParticle(m_truthParticles.pdgId.at(particle_i)),
+                                   m_truthParticles.pdgId.at(particle_i) >= 0 ? 1. : -1, // charge
+                                   m_truthParticles.m.at(particle_i));
+     Acts::Vector3 dir(m_truthParticles.px.at(particle_i),
+                       m_truthParticles.py.at(particle_i),
+                       m_truthParticles.pz.at(particle_i));
+     double abs_p = dir.norm();
+     particle.setAbsoluteMomentum(abs_p);
+     particle.setDirection(dir * (1/abs_p));
+     particle.setPosition4(m_truthVertices.x.at(vertex_i),
+                           m_truthVertices.y.at(vertex_i),
+                           m_truthVertices.z.at(vertex_i),
+                           m_truthVertices.t.at(vertex_i));
+  }
+  ctx.eventStore.add(m_cfg.particles, std::move(particles));
+  return barcode_map;
+}
+
+namespace {
+   Acts::GeometryIdentifier findGeoId(const ActsExamples::AlgorithmContext& ctx,
+                                      const Acts::TrackingGeometry &trackingGeometry,
+                                      std::map<unsigned long, Acts::GeometryIdentifier> &geo_map,
+                                      unsigned long detector_element_id,
+                                      const Acts::Vector3 &global_pos,
+                                      const double &max_error) {
+      std::map<unsigned long, Acts::GeometryIdentifier>::const_iterator
+         geomap_iter = geo_map.find(detector_element_id);
+      if (geomap_iter == geo_map.end()) {
+
+
+         const Acts::TrackingVolume* volume = trackingGeometry.lowestTrackingVolume(ctx.geoContext,
+                                                                              global_pos);
+         const Acts::TrackingVolume* final_volume = nullptr;
+         while (volume  != final_volume) {
+            final_volume = volume->lowestTrackingVolume(ctx.geoContext,
+                                                       global_pos,
+                                                       max_error);
+         }
+         if (final_volume) {
+            const Acts::Surface* min_surface=nullptr;
+            double min_distance2=std::numeric_limits<double>::max();
+
+            final_volume->visitSurfaces([&ctx, &max_error, &global_pos, &min_distance2, &min_surface](const Acts::Surface* surface) {
+               Acts::Vector3 dummy_momentum{};
+               Acts::Result<Acts::Vector2> result = surface->globalToLocal(ctx.geoContext,
+                                                                           global_pos,
+                                                                           dummy_momentum,
+                                                                           max_error);
+               if (result .ok()) {
+                  Acts::BoundaryCheck bcheck(true);
+                  if (surface->bounds().inside(result.value(), bcheck)) {
+                     Acts::Vector3 on_surface = surface->localToGlobal(ctx.geoContext,
+                                                                       result.value(),
+                                                                       dummy_momentum);
+                     double distance2 = (global_pos - on_surface).squaredNorm();
+                     if (distance2<min_distance2) {
+                        min_distance2 = distance2;
+                        min_surface = surface;
+                     }
+
+                  }
+               }
+            });
+            if (min_surface) {
+
+               const Acts::Layer* layer = min_surface->associatedLayer();
+               if (layer) {
+                  std::pair<std::map<unsigned long, Acts::GeometryIdentifier>::const_iterator, bool>
+                     insert_result = geo_map.insert( std::make_pair(detector_element_id, layer->geometryId()));
+                  if (insert_result.second) {
+                     return insert_result.first->second;
+                  }
+                  else {
+                     std::cout << "DEBUG detector element " << detector_element_id << " is already maped to "
+                               << insert_result.first->second << " new: " << layer->geometryId() << std::endl;
+                     return layer->geometryId();
+                  }
+               }
+
+            }
+         }
+
+         std::stringstream msg;
+         msg << "No matching geometry element found for " << detector_element_id  <<  " pos: "
+             << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2] << " .";
+         throw std::runtime_error( msg.str() );
+      }
+      return geomap_iter->second;
+   }
+   ActsFatras::Barcode findParticleBarCode(const std::map<int, ActsFatras::Barcode> &barcode_map, int source_barcode) {
+      std::map<int, ActsFatras::Barcode>::const_iterator  barcode_iter = barcode_map.find(source_barcode);
+      if (barcode_iter == barcode_map.end()) {
+         std::stringstream msg;
+         msg << "Unknown particle barcode " << source_barcode <<  " .";
+         throw std::runtime_error( msg.str() );
+      }
+      return barcode_iter->second;
+   }
+}
+void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& ctx,
+                                                       const std::map<int, ActsFatras::Barcode> &barcode_map) {
+  std::list<IndexSourceLink> sourceLinkStorage;
+  IndexSourceLinkContainer sourceLinks;
+  MeasurementContainer measurements;
+  IndexMultimap<ActsFatras::Barcode> measurementParticlesMap;
+  std::map<unsigned long, Acts::GeometryIdentifier> geo_map;
+  //  IndexMultimap<Index> measurementSimHitsMap;
+
+  unsigned int container_i=0;
+  for (const ClusterContainer &cluster_container : m_clusters ) {
+     cluster_container.checkDimensions();
+     const SDOInfoContainer &sdo_info = m_sdoInfo.at(container_i);
+     sdo_info.checkDimensions(cluster_container.localX->size());
+     
+     for (unsigned int meas_i=0; meas_i < cluster_container.localX->size(); ++meas_i) {
+        Index measurementIdx = measurements.size();
+        Acts::GeometryIdentifier geoId =  findGeoId(ctx,
+                                                    *(m_cfg.trackingGeometry),
+                                                    geo_map,
+                                                    cluster_container.detectorElementID->at(meas_i),
+                                                    Acts::Vector3(cluster_container.globalX->at(meas_i),
+                                                                  cluster_container.globalY->at(meas_i),
+                                                                  cluster_container.globalZ->at(meas_i)),
+                                                    std::max(cluster_container.localXError->at(meas_i),
+                                                             cluster_container.localYError->at(meas_i)));
+        
+        sourceLinkStorage.emplace_back(geoId, measurementIdx);
+        IndexSourceLink& sourceLink = sourceLinkStorage.back();
+
+        sourceLinks.insert(sourceLink);
+
+        // @TODO currently only 2D measurements are supported. 
+        std::array<Acts::BoundIndices, 2> indices {Acts::BoundIndices(0u),Acts::BoundIndices(1u)};
+        Acts::ActsVector<2>    par { cluster_container.localX->at(meas_i),
+                                     cluster_container.localY->at(meas_i)} ;
+        Acts::ActsSymMatrix<2> cov;
+        cov(0,0) = cluster_container.localXError->at(meas_i);
+        cov(1,1) = cluster_container.localYError->at(meas_i);
+        cov(0,1) = cluster_container.localXYCorrelation->at(meas_i);
+        cov(1,0) = cluster_container.localXYCorrelation->at(meas_i);
+
+        measurements.emplace_back( Acts::Measurement<Acts::BoundIndices, 2>(sourceLink, indices, par, cov) );
+
+        for ( const std::vector<int>  &sim_hit_list : sdo_info.sim_depositsBarcode->at(meas_i) ) {
+           for ( const int  &sim_barcode : sim_hit_list ) {           
+              measurementParticlesMap.emplace_hint(measurementParticlesMap.end(),
+                                                   measurementIdx,
+                                                   findParticleBarCode(barcode_map, sim_barcode));
+           }
+        }
+     }
+     ++container_i;
+  }
+
+  ctx.eventStore.add(m_cfg.sourceLinks, std::move(sourceLinks));
+  ctx.eventStore.add(m_cfg.sourceLinks + "__storage",
+                     std::move(sourceLinkStorage));
+  ctx.eventStore.add(m_cfg.measurements, std::move(measurements));
+  ctx.eventStore.add(m_cfg.measurementParticlesMap,
+                     std::move(measurementParticlesMap));
+}
+
 
 void ActsExamples::RootDigiReader::showStat() const {
    for (const std::pair< std::string, std::vector<std::pair<std::string, Stat>  > > &stat_list :  m_stat ) {
