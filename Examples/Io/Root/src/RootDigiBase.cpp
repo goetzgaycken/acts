@@ -111,8 +111,8 @@ ActsExamples::RootDigiBase::RootDigiBase(
         throw std::runtime_error("MeasurementType used more than once.");
      }
      mask |= (1<<type_i);
-     
-     connectClusters(m_cfg.measurementPrefix[measurement_i], m_clusters[measurement_i]);     
+
+     connectClusters(m_cfg.measurementPrefix[measurement_i], m_clusters[measurement_i]);
      connectSDOs(m_cfg.measurementPrefix[measurement_i], m_sdoInfo[measurement_i]);
      switch (type_i) {
      case kPixel:
@@ -227,21 +227,21 @@ ActsExamples::RootDigiWriter::RootDigiWriter(ActsExamples::RootDigiWriter::Confi
    :ActsExamples::RootDigiBase::RootDigiBase(cfg, "RootDigiWriter", true, lvl)
 {
 }
-  
+
 ActsExamples::ProcessCode ActsExamples::RootDigiWriter::write(const AlgorithmContext& ctx) {
   if (m_file == nullptr) {
     ACTS_ERROR("Missing output file");
     return ProcessCode::ABORT;
   }
   const ActsExamples::SimParticleContainer &particles = ctx.eventStore.get<ActsExamples::SimParticleContainer>(m_cfg.particles);
-   
+
   // ensure exclusive access to tree/file while writing
   std::lock_guard<std::mutex> lock(m_mutex);
 
   m_eventInfo.eventNumber = ctx.eventNumber;
   m_truthParticles.clear();
   std::vector< std::array<float,4 > > vertex_position;
-  
+
   m_truthVertices.clear();
   m_truthParticles.clear();
   m_truthParticles.reserve( particles.size());
@@ -263,7 +263,7 @@ ActsExamples::ProcessCode ActsExamples::RootDigiWriter::write(const AlgorithmCon
         static_cast<float>(particle.fourPosition().y() / Acts::UnitConstants::mm),
         static_cast<float>(particle.fourPosition().z() / Acts::UnitConstants::mm),
         static_cast<float>(particle.fourPosition().w() / Acts::UnitConstants::ns)
-     }; 
+     };
   }
   int idx=0;
   for (const std::array<float, 4> &vertex : vertex_position) {
@@ -374,7 +374,7 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
                     << " " << the_type
                     << std::endl;
        }
-       
+
     }
     if ( m_stat.empty() ) {
        m_stat.emplace_back( m_cfg.eventInfoPrefix,std::vector<std::pair<std::string,Stat> >() );
@@ -411,7 +411,7 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
           break;
        }
     }
-    
+
 # ifdef DEBUG_READ
     std::cout << "DEBUG " << name() << " " << m_eventInfo.eventNumber
               << " barcode=" << m_truthParticles.barcode.size() << " (" << static_cast<const void *>(&m_truthParticles.barcode) << ") "
@@ -452,7 +452,7 @@ std::map<int, ActsFatras::Barcode> ActsExamples::RootDigiReader::convertParticle
   m_truthVertices.checkDimensions();
   std::map<int, ActsFatras::Barcode> barcode_map;
   for (unsigned int particle_i = 0; particle_i < m_truthParticles.pdgId.size(); ++particle_i) {
-     // somehow map the input barcode and vertex index to the ActsFatras::Barcode 
+     // somehow map the input barcode and vertex index to the ActsFatras::Barcode
      unsigned int vertex_i = (m_truthParticles.n_prodVtxLink>0 && particle_i < static_cast<unsigned int>(m_truthParticles.n_prodVtxLink)
                               ? m_truthParticles.prodVtxLink_m_persIndex[ particle_i ]
                               : std::numeric_limits<unsigned int>::max() );
@@ -465,7 +465,7 @@ std::map<int, ActsFatras::Barcode> ActsExamples::RootDigiReader::convertParticle
                       << " -> " << (vertex_i & 0xffffff) );
         }
      }
-     
+
      const auto pid = ActsFatras::Barcode(0u)
         .setParticle(m_truthParticles.barcode.at(particle_i) & 0xffff)
         .setSubParticle((m_truthParticles.barcode.at(particle_i)>>16) & 0xffff)
@@ -593,7 +593,7 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
      cluster_container.checkDimensions();
      const SDOInfoContainer &sdo_info = m_sdoInfo.at(container_i);
      sdo_info.checkDimensions(cluster_container.localX->size());
-     
+
      for (unsigned int meas_i=0; meas_i < cluster_container.localX->size(); ++meas_i) {
         Index measurementIdx = measurements.size();
         Acts::GeometryIdentifier geoId =  findGeoId(ctx,
@@ -605,13 +605,13 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
                                                                   cluster_container.globalZ->at(meas_i)),
                                                     std::max(cluster_container.localXError->at(meas_i),
                                                              cluster_container.localYError->at(meas_i)));
-        
+
         sourceLinkStorage.emplace_back(geoId, measurementIdx);
         IndexSourceLink& sourceLink = sourceLinkStorage.back();
 
         sourceLinks.insert(sourceLink);
 
-        // @TODO currently only 2D measurements are supported. 
+        // @TODO currently only 2D measurements are supported.
         std::array<Acts::BoundIndices, 2> indices {Acts::BoundIndices(0u),Acts::BoundIndices(1u)};
         Acts::ActsVector<2>    par { cluster_container.localX->at(meas_i),
                                      cluster_container.localY->at(meas_i)} ;
@@ -624,7 +624,7 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
         measurements.emplace_back( Acts::Measurement<Acts::BoundIndices, 2>(sourceLink, indices, par, cov) );
 
         for ( const std::vector<int>  &sim_hit_list : sdo_info.sim_depositsBarcode->at(meas_i) ) {
-           for ( const int  &sim_barcode : sim_hit_list ) {           
+           for ( const int  &sim_barcode : sim_hit_list ) {
               measurementParticlesMap.emplace_hint(measurementParticlesMap.end(),
                                                    measurementIdx,
                                                    findParticleBarCode(barcode_map, sim_barcode));
