@@ -304,7 +304,7 @@ ActsExamples::ProcessCode ActsExamples::RootDigiWriter::write(const AlgorithmCon
                                                              globalPos[0],globalPos[1],globalPos[2], geoId.value());
 
      std::vector<int> sdo_word;
-     std::vector< std::vector<int> > sdo_barcode;
+     std::vector< std::vector<uint64_t> > sdo_barcode;
      std::vector< std::vector<float> > sdo_depositsEnergy;
      auto matchingParticles = makeRange(hitParticlesMap.equal_range(meas_i));
      sdo_word.reserve(sdo_word.size());

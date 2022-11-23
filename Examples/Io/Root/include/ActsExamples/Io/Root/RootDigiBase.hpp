@@ -157,7 +157,7 @@ class RootDigiBase {
   struct ParticleContainer {
      static constexpr unsigned int kNParticlesMax = 15000;
      std::vector<int>     pdgId;
-     std::vector<int>     barcode; // @TODO should be uint64 (schema evolution? )
+     std::vector<uint64_t>     barcode; // @TODO should be uint64 (schema evolution? )
      std::vector<int>     status;
      Int_t           n_prodVtxLink = 0;
      // UInt_t          TruthParticlesAux_prodVtxLink_m_persKey[1];   //[TruthParticlesAux.prodVtxLink_]
@@ -248,7 +248,7 @@ class RootDigiBase {
         }
         if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
         std::for_each(pdgId.begin(),pdgId.end(),StatFiller<int>(stat[kStat_pdgId].second));
-        std::for_each(barcode.begin(),barcode.end(),StatFiller<int>(stat[kStat_barcode].second));
+        std::for_each(barcode.begin(),barcode.end(),StatFiller<uint64_t>(stat[kStat_barcode].second));
         std::for_each(status.begin(),status.end(),StatFiller<int>(stat[kStat_status].second));
         stat[kStat_n_prodVtxLink].second.add(n_prodVtxLink);
         if (n_prodVtxLink>0) {
@@ -277,7 +277,7 @@ class RootDigiBase {
   };
   struct ParticleVertexContainer {
      //     std::vector<int>     id;
-     std::vector<int>     barcode;
+     std::vector<uint64_t>     barcode;
      //     std::vector<std::vector<ElementLink<DataStd::Vector<xAOD::TruthParticle_v1> > > > TruthVerticesAux_incomingParticleLinks;
      //     std::vector<std::vector<ElementLink<DataStd::Vector<xAOD::TruthParticle_v1> > > > TruthVerticesAux_outgoingParticleLinks;
      std::vector<float>   x;
@@ -323,7 +323,7 @@ class RootDigiBase {
            stat.push_back(std::make_pair(std::string("t"),Stat()));
         }
         if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
-        std::for_each(barcode.begin(),barcode.end(),StatFiller<int>(stat[kStat_barcode].second));
+        std::for_each(barcode.begin(),barcode.end(),StatFiller<uint64_t>(stat[kStat_barcode].second));
         std::for_each(x.begin(),x.end(),StatFiller<float>(stat[kStat_x].second));
         std::for_each(y.begin(),y.end(),StatFiller<float>(stat[kStat_y].second));
         std::for_each(z.begin(),z.end(),StatFiller<float>(stat[kStat_z].second));
@@ -413,7 +413,7 @@ class RootDigiBase {
   };
   struct SDOInfoContainer {
    std::vector<std::vector<int> >                 *sdo_words = nullptr;
-   std::vector<std::vector<std::vector<int> > >   *sim_depositsBarcode = nullptr;  // @TODO should be uint64 (schema evolution? )
+   std::vector<std::vector<std::vector<uint64_t> > >   *sim_depositsBarcode = nullptr;  // @TODO should be uint64 (schema evolution? )
    std::vector<std::vector<std::vector<float> > > *sim_depositsEnergy = nullptr;
      void reserve(std::size_t new_capacity) {
         if (sdo_words) sdo_words->reserve(new_capacity);
@@ -421,7 +421,7 @@ class RootDigiBase {
         if (sim_depositsEnergy)  sim_depositsEnergy->reserve(new_capacity);
      }
      void push_back(std::vector< int> &&a_sdo_words,
-                    std::vector<std::vector< int> > &&a_sim_depositsBarcode,
+                    std::vector<std::vector< uint64_t> > &&a_sim_depositsBarcode,
                     std::vector<std::vector<float> > &&a_sim_depositsEnergy ) {
         assert( a_sdo_words.size() == a_sim_depositsEnergy.size() && a_sim_depositsEnergy.size() == a_sim_depositsBarcode.size());
         assert(    std::accumulate(a_sim_depositsBarcode.begin(),a_sim_depositsBarcode.begin(),0u,[](auto &elm) { return elm.size(); })
@@ -450,7 +450,7 @@ class RootDigiBase {
         }
         if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
         std::for_each(sdo_words->begin(),sdo_words->end(),StatFiller<int>(stat[kStat_sdo_words].second));
-        std::for_each(sim_depositsBarcode->begin(),sim_depositsBarcode->end(),StatFiller<int>(stat[kStat_sim_depositsBarcode].second));
+        //        std::for_each(sim_depositsBarcode->begin(),sim_depositsBarcode->end(),StatFiller<uint64_t>(stat[kStat_sim_depositsBarcode].second));
         std::for_each(sim_depositsEnergy->begin(),sim_depositsEnergy->end(),StatFiller<float>(stat[kStat_sim_depositsEnergy].second));
      }
   };
