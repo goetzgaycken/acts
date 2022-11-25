@@ -242,6 +242,7 @@ void Acts::TGeoLayerBuilder::buildLayers(const GeometryContext& gctx,
           m_elementStore.push_back(tge);
           layerSurfaces.push_back(tge->surface().getSharedPtr());
         }
+        m_elementStore.push_back(std::move(tgElement));
       }
 
       ACTS_DEBUG("- created TGeoDetectorElements : " << layerSurfaces.size());
