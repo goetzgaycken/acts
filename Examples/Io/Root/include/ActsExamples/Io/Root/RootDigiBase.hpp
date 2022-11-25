@@ -100,6 +100,7 @@ class RootDigiBase {
   const ConfigBase& config() const { return m_cfg; }
 
  protected:
+  void setupTree();
   /// Private access to the logging instance
   const Acts::Logger& logger() const { return *m_logger; }
   /// Type-specific write implementation.
