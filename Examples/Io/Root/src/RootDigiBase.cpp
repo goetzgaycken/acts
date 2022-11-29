@@ -33,6 +33,7 @@ using HitParticlesMap = IndexMultimap<ActsFatras::Barcode>;
 #include "TFile.h"
 #include "TTree.h"
 #include "TBranch.h"
+#include "TH2F.h"
 
 #define DEBUG_READ 1
 
@@ -71,6 +72,8 @@ ActsExamples::RootDigiBase::RootDigiBase(
      if (!supported) throw std::runtime_error("unsupported file mode for reading");
   }
   setupTree();
+  setupValidationHists();
+  readSurfaceCenters();
  }
 void ActsExamples::RootDigiBase::setupTree() {
   m_file = TFile::Open(m_cfg.filePath.c_str(), m_cfg.fileMode.c_str());
@@ -127,6 +130,121 @@ void ActsExamples::RootDigiBase::setupTree() {
         break;
      default:
         break;
+     }
+  }
+}
+
+void ActsExamples::RootDigiBase::readSurfaceCenters() {
+   if (!m_cfg.surfaceCenterFile.empty()) {
+      std::ifstream in(m_cfg.surfaceCenterFile);
+      while (in) {
+         uint64_t id;
+         std::array<double,3> center;
+         in >> id >> center[0] >> center[1];
+         if (in) {
+            in >> center[2];
+            std::cout << id << " " << center[0] << " " << center[1] << " " << center[2] << std::endl;
+            m_surfaceCenters.insert( std::make_pair(id, center) );
+         }
+      }
+      std::cout << "DEBUG read " << m_surfaceCenters.size() << " surface centers." << std::endl;
+   }
+}
+
+void ActsExamples::RootDigiBase::setupValidationHists() {
+   if (!m_cfg.outputFilePath.empty()) {
+      static const std::array<std::string,kNHistCategories> cat_names{ std::string("_geoMatched"),std::string("_noGeoMatch")};
+      static const std::array<std::string,kNHistTypes> type_names{ std::string("MeasPos_RZ"), std::string("MeasPos_RPhi"),std::string("MeasPos_ZPhi")};
+
+      //      const std::array<float,16> z_slices{-2800,-2500,-2200,-1954,-1900,-1700,-1600,-1490,
+      //                                   1490, 1600, 1700, 1900, 1954, 2200, 2500, 2800 };
+      //      const float r=350;
+      std::array<const char *,19> zslice_names{"Pixel",
+                                               "StripOuter",
+                                               "StripEM8","StripEM7","StripEM6","StripEM5","StripEM4","StripEM3","StripEM2", "StripEM1",
+                                               "StripB",
+                                               "StripEP1","StripEP2","StripEP3","StripEP4","StripEP5","StripEP6", "StripEP7","StripEP8" };
+
+      for (unsigned int cat_i=0; cat_i < kNHistCategories; ++cat_i ) {
+         //enum EHistType {kPosREta, kPosRPhi, kPosEtaPhi, kNHistTypes};
+         m_validationeHist.at(kPosRZ).at(cat_i)=new TH2F((type_names[kPosRZ]+cat_names[cat_i]).c_str(),
+                                                           (type_names[kPosRZ]+cat_names[cat_i]).c_str(),
+                                                           1000,0,1200,2000,0,3000);
+         m_validationeHist.at(kPosRPhi).at(cat_i)=new TH2F((type_names[kPosRPhi]+cat_names[cat_i]).c_str(),
+                                                           (type_names[kPosRPhi]+cat_names[cat_i]).c_str(),
+                                                           1000,0,1200,500,-M_PI, M_PI);
+         m_validationeHist.at(kPosZPhi).at(cat_i)=new TH2F((type_names[kPosZPhi]+cat_names[cat_i]).c_str(),
+                                                           (type_names[kPosZPhi]+cat_names[cat_i]).c_str(),
+                                                           2000,0,3000,100,-M_PI, M_PI);
+         unsigned int z_i=0;
+         m_validationeHist.at(kPosPixel+z_i).at(cat_i)=new TH2F((std::string(zslice_names.at(z_i))+cat_names[cat_i]).c_str(),
+                                                                (std::string(zslice_names.at(z_i))+cat_names[cat_i]).c_str(),
+                                                                350,0,350,100,-M_PI, M_PI);
+         for (; ++z_i<kNHistTypes-kPosPixel;) {
+            m_validationeHist.at(kPosPixel+z_i).at(cat_i)=new TH2F((std::string(zslice_names.at(z_i))+cat_names[cat_i]).c_str(),
+                                                                    (std::string(zslice_names.at(z_i))+cat_names[cat_i]).c_str(),
+                                                                    500,350,1050,100,-M_PI, M_PI);
+         }
+
+      }
+   }
+}
+
+void ActsExamples::RootDigiBase::fillValidationHists(const Acts::Vector3 &global_pos, EHistCategory category) {
+   if (!m_cfg.outputFilePath.empty()) {
+      double phi = Acts::VectorHelpers::phi(global_pos);
+      //      double eta = Acts::VectorHelpers::eta(global_pos);
+      double z = global_pos[2];
+      double r = Acts::VectorHelpers::perp(global_pos);
+
+      static const std::array<float,18> z_slices{-5000,-2800,-2500,-2200,-1954,-1900,-1700,-1600,-1490,
+                                                  1490, 1600, 1700, 1900, 1954, 2200, 2500, 2800,5000 };
+      static const float r_pixel=350;
+
+      m_validationeHist.at(kPosRZ).at(category)->Fill(r, z);
+      m_validationeHist.at(kPosRPhi).at(category)->Fill(r,phi);
+      m_validationeHist.at(kPosZPhi).at(category)->Fill(z,phi);
+      m_validationeHist.at(kPosZPhi).at(category)->Fill(z,phi);
+      if (r<r_pixel) {
+         m_validationeHist.at(kPosPixel).at(category)->Fill(r,phi);
+      }
+      else {
+         unsigned int z_i=0;
+         if (std::abs(z)<3000) {
+            for (; ++z_i<z_slices.size();) {
+               if (z<z_slices.at(z_i)) break;
+            }
+         }
+         m_validationeHist.at(kPosStripOuter+z_i).at(category)->Fill(r,phi);
+      }
+   }
+}
+
+namespace {
+   class GlobalRootRestore {
+   public:
+      GlobalRootRestore() : m_lastFile(gFile), m_lastDir(gDirectory) {}
+      ~GlobalRootRestore() { gFile= m_lastFile; gDirectory = m_lastDir; if (gDirectory) {gDirectory->cd(); } }
+   private:
+      TFile      *m_lastFile;
+      TDirectory *m_lastDir;
+   };
+}
+void ActsExamples::RootDigiBase::writeValidationHists() const {
+  if (!m_cfg.outputFilePath.empty()) {
+     GlobalRootRestore restore;
+
+     std::unique_ptr<TFile> output( TFile::Open(m_cfg.outputFilePath.c_str(),"RECREATE"));
+     if (output && output->IsWritable()) {
+        output->cd();
+        for (unsigned int type_i=0; type_i < kNHistTypes; ++type_i) {
+           for (unsigned int cat_i=0; cat_i < kNHistCategories; ++cat_i ) {
+              m_validationeHist.at(type_i).at(cat_i)->Write();
+           }
+        }
+     }
+     else {
+        ACTS_ERROR("Failed to create output file " << m_cfg.outputFilePath);
      }
   }
 }
@@ -603,7 +721,7 @@ namespace {
       ActsExamples::Stat total_stat_max;
       unsigned long max_distance=0;
       for (const std::pair< const unsigned long, DistanceRange > & distance_range : match_distance_range ) {
-         if (distance_range.second.m_max > total.m_max) {
+         if (distance_range.second.m_max > total.m_max) { 
             max_distance = distance_range.first;
          }
          total_stat_max.add(distance_range.second.m_max);
@@ -618,15 +736,17 @@ namespace {
       std::cout << "DEBUG max distance: " << total_stat_max << std::endl;
       std::cout << "DEBUG count: "        << total_stat_count << std::endl;
       std::cout << "DEBUG log distance: " << log_distance << std::endl;
-      
    }
-   
-   Acts::GeometryIdentifier findGeoId(const ActsExamples::AlgorithmContext& ctx,
+
+   std::pair<Acts::GeometryIdentifier,bool> findGeoId(const ActsExamples::AlgorithmContext& ctx,
                                       const Acts::TrackingGeometry &trackingGeometry,
                                       std::unordered_map<unsigned long, Acts::GeometryIdentifier> &geo_map,
                                       unsigned long detector_element_id,
                                       const Acts::Vector3 &global_pos,
-                                      const double &max_error) {
+                                                      const double &max_error,
+                                                      bool dump_surface=false) {
+
+      std::pair<Acts::GeometryIdentifier,bool> ret{};
       //std::regex ignore(".*HGTD.*");
       std::unordered_map<unsigned long, Acts::GeometryIdentifier>::const_iterator
          geomap_iter = geo_map.find(detector_element_id);
@@ -684,7 +804,13 @@ namespace {
             });
             if (min_surface) {
                const Acts::Layer* layer = min_surface->associatedLayer();
-               
+               if (dump_surface) {
+                     std::cout << "DEBUG surface for detector element " << detector_element_id << " mapped to "
+                               << layer->geometryId();
+                     min_surface->toStream(ctx.geoContext, std::cout);
+                     std::cout << std::endl;
+
+               }
                if (layer) {
                   if (min_distance2>1e-4*1e-4) {
                      std::cout << "WARNING large matching distance for detector element " << detector_element_id << " mapped to "
@@ -697,7 +823,8 @@ namespace {
                   match_distance_range[detector_element_id].update( sqrt(min_distance2) );
                   log_distance.add( min_distance2>0 ? log( sqrt(min_distance2) ) / log(10.) : -308 );
                   if (geomap_iter != geo_map.end()) {
-                     if (layer->geometryId() == geomap_iter->second) return geomap_iter->second;
+                     if (layer->geometryId() == geomap_iter->second) return std::make_pair(geomap_iter->second,
+                                                                                           sqrt(min_distance2) < 1e-3);
                      std::cout << "ERROR Geometry element for " << detector_element_id  <<  " and pos: "
                                << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2] << " ."
                                << layer->geometryId()
@@ -711,14 +838,18 @@ namespace {
                      insert_result = geo_map.insert( std::make_pair(detector_element_id, layer->geometryId()));
                   if (insert_result.second) {
                      m_destinationMultiplicity[insert_result.first->second].updateBox(global_pos);
-                     std::cout << "DEBUG detector element " << detector_element_id << " mapped to "
-                               << insert_result.first->second << " distance=" << sqrt(min_distance2) << std::endl;
-                     return insert_result.first->second;
+                      std::cout << "DEBUG detector element " << detector_element_id << " mapped to "
+                                << insert_result.first->second << " distance=" << sqrt(min_distance2)
+                                << " pos " << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2]
+                                << std::endl;
+                     return std::make_pair(insert_result.first->second,
+                                           sqrt(min_distance2) < 1e-3);
                   }
                   else {
                      std::cout << "WARNING detector element " << detector_element_id << " is already mapped to "
                                << insert_result.first->second << " new: " << layer->geometryId() << std::endl;
-                     return layer->geometryId();
+                     return std::make_pair(layer->geometryId(),
+                                           sqrt(min_distance2) < 1e-3);
                   }
                   }
                }
@@ -740,7 +871,7 @@ namespace {
              << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2] << " .";
          throw std::runtime_error( msg.str() );
       }
-      return geomap_iter->second;
+      return std::make_pair(geomap_iter->second,false);
    }
    ActsFatras::Barcode findParticleBarCode(const std::map<int, ActsFatras::Barcode> &barcode_map, int source_barcode) {
       std::map<int, ActsFatras::Barcode>::const_iterator  barcode_iter = barcode_map.find(source_barcode);
@@ -783,15 +914,31 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
 
   //    });
 
+  for (const std::pair<const uint64_t, std::array<double,3 > > &elm : m_surfaceCenters) {
+     std::cout <<"Find geoID for surface " << elm.first << " : " << elm.second[0] << ", " << elm.second[1] << ", " << elm.second[2]
+               << std::endl;
+           //        Acts::GeometryIdentifier geoId
+           std::pair<Acts::GeometryIdentifier,bool> ret =  findGeoId(ctx,
+                                                                     *(m_cfg.trackingGeometry),
+                                                                     geo_map,
+                                                                     elm.first,
+                                                                     Acts::Vector3(elm.second[0],elm.second[1],elm.second[2]),
+                                                                     1e-3,
+                                                                     true);
+  }
+
+
   unsigned int container_i=0;
   for (const ClusterContainer &cluster_container : m_clusters ) {
      cluster_container.checkDimensions();
      const SDOInfoContainer &sdo_info = m_sdoInfo.at(container_i);
      sdo_info.checkDimensions(cluster_container.localX->size());
+     std::vector< unsigned int > mismatch;
 
      for (unsigned int meas_i=0; meas_i < cluster_container.localX->size(); ++meas_i) {
         Index measurementIdx = measurements.size();
-        Acts::GeometryIdentifier geoId =  findGeoId(ctx,
+        //        Acts::GeometryIdentifier geoId
+        std::pair<Acts::GeometryIdentifier,bool> ret =  findGeoId(ctx,
                                                     *(m_cfg.trackingGeometry),
                                                     geo_map,
                                                     cluster_container.detectorElementID->at(meas_i),
@@ -800,6 +947,12 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
                                                                   cluster_container.globalZ->at(meas_i)),
                                                     std::max(cluster_container.localXError->at(meas_i),
                                                              cluster_container.localYError->at(meas_i)));
+        Acts::GeometryIdentifier geoId = ret.first;
+        fillValidationHists(Acts::Vector3(cluster_container.globalX->at(meas_i),
+                                          cluster_container.globalY->at(meas_i),
+                                          cluster_container.globalZ->at(meas_i)),
+                            ret.second ? kMatched : kUnmatched);
+        if (!ret.second) mismatch.push_back(meas_i);
 
         sourceLinkStorage.emplace_back(geoId, measurementIdx);
         IndexSourceLink& sourceLink = sourceLinkStorage.back();
@@ -833,6 +986,26 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
            }
         }
      }
+
+     for (unsigned int meas_i  : mismatch) {
+        Index measurementIdx = measurements.size();
+        std::cout << "DEBUG search again " << meas_i << " : " << cluster_container.detectorElementID->at(meas_i)
+                  << std::endl;
+        std::map<uint64_t, std::array<double,3 > >::const_iterator 
+           iter = m_surfaceCenters.find(cluster_container.detectorElementID->at(meas_i));
+        if (iter != m_surfaceCenters.end()) {
+           //        Acts::GeometryIdentifier geoId
+           std::pair<Acts::GeometryIdentifier,bool> ret =  findGeoId(ctx,
+                                                                     *(m_cfg.trackingGeometry),
+                                                                     geo_map,
+                                                                     cluster_container.detectorElementID->at(meas_i),
+                                                                     Acts::Vector3(iter->second[0],iter->second[1],iter->second[2]),
+                                                                     std::max(cluster_container.localXError->at(meas_i),
+                                                                              cluster_container.localYError->at(meas_i)));
+        }
+
+     }
+
      ++container_i;
   }
   checkDestinationMultiplicity();

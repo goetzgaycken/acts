@@ -22,6 +22,7 @@
 #include <type_traits>
 
 class TFile;
+class TH2;
 //class TTree;
 //class TBranch;
 
@@ -77,6 +78,12 @@ class RootDigiBase {
     /// the tracking geometry necessary to match measurements to surfaces and/or perform local to global transformations
     std::shared_ptr<const Acts::TrackingGeometry> trackingGeometry;
 
+    /// optional path to write out some validation histograms
+    std::string outputFilePath;
+
+    /// optional path to write out some validation histograms
+    std::string surfaceCenterFile;
+
     /// send stop signal to precess upon construction to allow attaching a debugger
     bool stop = false;
   };
@@ -101,6 +108,10 @@ class RootDigiBase {
 
  protected:
   void setupTree();
+  void setupValidationHists();
+  void writeValidationHists() const;
+  void readSurfaceCenters();
+
   /// Private access to the logging instance
   const Acts::Logger& logger() const { return *m_logger; }
   /// Type-specific write implementation.
@@ -665,6 +676,20 @@ protected:
 
   std::vector<std::function<void() > > m_cleanup;
   std::vector<std::pair< std::string, std::vector<std::pair<std::string, Stat>  > > > m_stat;
+
+  enum EHistCategory {kMatched, kUnmatched, kNHistCategories};
+  enum EHistType {kPosRZ, kPosRPhi, kPosZPhi,
+                  kPosPixel,
+                  kPosStripOuter,
+                  kPosStripEM8,kPosStripEM7,kPosStripEM6,kPosStripEM5,kPosStripEM4,kPosStripEM3,kPosStripEM2, kPosStripEM1,
+                  kPosStripB,
+                  kPosStripEP1,kPosStripEP2,kPosStripEP3,kPosStripEP4,kPosStripEP5,kPosStripEP6, kPosStripEP7,kPosStripEP8,
+                  kNHistTypes};
+
+  std::array<std::array<TH2 *,kNHistCategories>, kNHistTypes> m_validationeHist;
+  std::map<uint64_t, std::array<double,3> > m_surfaceCenters;
+protected:
+  void fillValidationHists(const Acts::Vector3 &global_pos, EHistCategory category);
 };
 
 class RootDigiWriter : public RootDigiBase, public virtual IWriter {
@@ -685,7 +710,7 @@ public:
      struct Config : public ConfigBase {};
      RootDigiReader();
      RootDigiReader(Config cfg, Acts::Logging::Level lvl);
-     ~RootDigiReader() { showStat(); endRunBase(); }
+     ~RootDigiReader() { showStat(); writeValidationHists(); endRunBase(); }
 
      std::string name() const override { return "RootDigiReader"; };
 

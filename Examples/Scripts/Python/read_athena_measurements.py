@@ -6,6 +6,11 @@ u = acts.UnitConstants
 geo_dir = pathlib.Path("acts-itk")
 outputDir = pathlib.Path.cwd() / "itk_output"
 
+detector, trackingGeometry, decorators = acts.examples.itk.buildITkGeometry(geo_dir,
+                                                                            logLevel=acts.logging.WARNING,
+)
+print ("buildITkGeometry done")
+
 def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
     # hepmc_dir = os.path.join(outputDir, "hepmc3")
     # if not os.path.exists(hepmc_dir):
@@ -17,7 +22,6 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
         outputDir=str(outputDir),
     )
 
-    # detector, trackingGeometry, decorators = acts.examples.itk.buildITkGeometry(geo_dir)
     # field = acts.examples.MagneticFieldMapXyz(str(geo_dir / "bfield/ATLAS-BField-xyz.root"))
     digiReader = acts.examples.RootDigiReader (
         level=acts.logging.DEBUG,
@@ -47,8 +51,11 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
 
         trackingGeometry = trackingGeometry,
 
+        outputFilePath = outputDir +'/geoMatching.root',
+
+        surfaceCenterFile = '/tmp/surface_centers.txt',
         # when set to true, prrogram will be stopped upon construction to allow for a debugger to be attached
-        stop = True
+        stop = False
     )
 
     s.addReader(digiReader)
@@ -58,5 +65,5 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
 
 if "__main__" == __name__:
 
-    trackingGeometry=None
+    # trackingGeometry=None
     readAthenaMeasurements(trackingGeometry, inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.pool.root', outputDir=os.getcwd()).run()
