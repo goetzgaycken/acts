@@ -51,7 +51,7 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
 
         trackingGeometry = trackingGeometry,
 
-        outputFilePath = outputDir +'/geoMatching.root',
+        outputFilePath = outputDir +'/geoMatching_EC_mu200_fullTruth.root',
 
         surfaceCenterFile = '/tmp/surface_centers.txt',
         # when set to true, prrogram will be stopped upon construction to allow for a debugger to be attached
@@ -66,4 +66,6 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
 if "__main__" == __name__:
 
     # trackingGeometry=None
-    readAthenaMeasurements(trackingGeometry, inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.pool.root', outputDir=os.getcwd()).run()
+
+#    readAthenaMeasurements(trackingGeometry, inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.pool.root', outputDir=os.getcwd()).run()
+    readAthenaMeasurements(trackingGeometry, inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.mu200_fullTruth.pool.root', outputDir=os.getcwd()).run()
