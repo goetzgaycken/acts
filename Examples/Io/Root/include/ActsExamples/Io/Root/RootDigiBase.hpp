@@ -312,7 +312,7 @@ class RootDigiBase {
   };
   struct ParticleVertexContainer {
      //     std::vector<int>     id;
-     std::vector<uint64_t>     barcode;
+     std::vector<int>     barcode;
      //     std::vector<std::vector<ElementLink<DataStd::Vector<xAOD::TruthParticle_v1> > > > TruthVerticesAux_incomingParticleLinks;
      //     std::vector<std::vector<ElementLink<DataStd::Vector<xAOD::TruthParticle_v1> > > > TruthVerticesAux_outgoingParticleLinks;
      std::vector<float>   x;
@@ -529,7 +529,7 @@ class RootDigiBase {
         if (stat.empty()) {
            stat.reserve(kNStat);
            stat.push_back(std::make_pair(std::string("sdo_words"),Stat()));
-           stat.push_back(std::make_pair(std::string("sim_depositsBarcode"),Stat()));
+           stat.push_back(std::make_pair(std::string("sim_depositsBarcode"),Stat(4,-1.5,2.5)));
            stat.push_back(std::make_pair(std::string("sim_depositsEnergy"),Stat()));
         }
         if (stat.size() != kNStat) { throw std::runtime_error("Stat array has invalid dimension."); }
@@ -690,6 +690,8 @@ protected:
   std::map<uint64_t, std::array<double,3> > m_surfaceCenters;
 protected:
   void fillValidationHists(const Acts::Vector3 &global_pos, EHistCategory category);
+   enum EAssocStat {kEnergy,kEnergyFraction, kContributions, kContributionsValidBarcode, kNAssocStat};
+   std::array<Stat,kNAssocStat> m_assoStat;
 };
 
 class RootDigiWriter : public RootDigiBase, public virtual IWriter {

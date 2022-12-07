@@ -5,6 +5,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
+#include "Acts/Surfaces/AnnulusBounds.hpp"
 
 #include "ActsExamples/Io/Root/RootDigiBase.hpp"
 
@@ -35,7 +36,7 @@ using HitParticlesMap = IndexMultimap<ActsFatras::Barcode>;
 #include "TBranch.h"
 #include "TH2F.h"
 
-#define DEBUG_READ 1
+//#define DEBUG_READ 1
 
 ActsExamples::RootDigiBase::RootDigiBase(
     ActsExamples::RootDigiBase::ConfigBase cfg,
@@ -143,7 +144,7 @@ void ActsExamples::RootDigiBase::readSurfaceCenters() {
          in >> id >> center[0] >> center[1];
          if (in) {
             in >> center[2];
-            std::cout << id << " " << center[0] << " " << center[1] << " " << center[2] << std::endl;
+            // std::cout << id << " " << center[0] << " " << center[1] << " " << center[2] << std::endl;
             m_surfaceCenters.insert( std::make_pair(id, center) );
          }
       }
@@ -169,13 +170,13 @@ void ActsExamples::RootDigiBase::setupValidationHists() {
          //enum EHistType {kPosREta, kPosRPhi, kPosEtaPhi, kNHistTypes};
          m_validationeHist.at(kPosRZ).at(cat_i)=new TH2F((type_names[kPosRZ]+cat_names[cat_i]).c_str(),
                                                            (type_names[kPosRZ]+cat_names[cat_i]).c_str(),
-                                                           1000,0,1200,2000,0,3000);
+                                                           1000,350,1200,2000,14000,3000);
          m_validationeHist.at(kPosRPhi).at(cat_i)=new TH2F((type_names[kPosRPhi]+cat_names[cat_i]).c_str(),
                                                            (type_names[kPosRPhi]+cat_names[cat_i]).c_str(),
-                                                           1000,0,1200,500,-M_PI, M_PI);
+                                                           1000,350,1200,500,0, M_PI);
          m_validationeHist.at(kPosZPhi).at(cat_i)=new TH2F((type_names[kPosZPhi]+cat_names[cat_i]).c_str(),
                                                            (type_names[kPosZPhi]+cat_names[cat_i]).c_str(),
-                                                           2000,0,3000,100,-M_PI, M_PI);
+                                                           2000,1400,3000,500,0, M_PI);
          unsigned int z_i=0;
          m_validationeHist.at(kPosPixel+z_i).at(cat_i)=new TH2F((std::string(zslice_names.at(z_i))+cat_names[cat_i]).c_str(),
                                                                 (std::string(zslice_names.at(z_i))+cat_names[cat_i]).c_str(),
@@ -201,10 +202,12 @@ void ActsExamples::RootDigiBase::fillValidationHists(const Acts::Vector3 &global
                                                   1490, 1600, 1700, 1900, 1954, 2200, 2500, 2800,5000 };
       static const float r_pixel=350;
 
-      m_validationeHist.at(kPosRZ).at(category)->Fill(r, z);
-      m_validationeHist.at(kPosRPhi).at(category)->Fill(r,phi);
-      m_validationeHist.at(kPosZPhi).at(category)->Fill(z,phi);
-      m_validationeHist.at(kPosZPhi).at(category)->Fill(z,phi);
+      if (r>350 && z>1400 && phi>=0) {
+         m_validationeHist.at(kPosRZ).at(category)->Fill(r, z);
+         m_validationeHist.at(kPosRPhi).at(category)->Fill(r,phi);
+         m_validationeHist.at(kPosZPhi).at(category)->Fill(z,phi);
+         m_validationeHist.at(kPosZPhi).at(category)->Fill(z,phi);
+      }
       if (r<r_pixel) {
          m_validationeHist.at(kPosPixel).at(category)->Fill(r,phi);
       }
@@ -468,6 +471,95 @@ ActsExamples::RootDigiReader::RootDigiReader(ActsExamples::RootDigiReader::Confi
 std::pair<size_t, size_t> ActsExamples::RootDigiReader::availableEvents() const {
    //   return std::make_pair(0u, m_tree->GetEntries() );
    return std::make_pair(0u, 1u );
+}
+
+
+namespace {
+   bool altBoundsCheck(uint64_t detElementId,
+                       const Acts::Vector2 &locpos,
+                       const std::vector<Acts::Vector2> &corners, bool verbose=false) {
+      const double p0=locpos[0];
+      const double p1=locpos[1];
+      const double x0=corners[0][0];
+      const double y0=corners[0][1];
+      const double x1=corners[1][0];
+      const double y1=corners[1][1];
+      const double x2=corners[2][0];
+      const double y2=corners[2][1];
+      const double x3=corners[3][0];
+      const double y3=corners[3][1];
+
+      // express the coordiantes of the measurement in some wierd wierd coordinate system
+      // for which s=0,t=0 is the center of the polygon and the 4 corners
+      // are reached for (s=-1,+1 , t=-1,+1)
+      // s goes in direction : from  edge corner 0, corner 1 to edge corner 3, corner 2
+      // t goes in direction : from  edge corner 0, corner 3 to edge corner 1, corner 2
+      // locX = -(s*t*x3-t*x3+s*x3-x3-s*t*x2-t*x2-s*x2-x2+s*t*x1+t*x1-s*x1-x1-s*t*x0+t*x0+s*x0-x0)/4
+      // locY = -(s*t*y3-t*y3+s*y3-y3-s*t*y2-t*y2-s*y2-y2+s*t*y1+t*y1-s*y1-y1-s*t*y0+t*y0+s*y0-y0)/4
+      //
+      // solution for s,t:
+      // s=  ((t+1)*x3+(t+1)*x2+(1-t)*x1+(1-t)*x0-4*p0)
+      //    /((t+1)*x3+(-t-1)*x2+(t-1)*x1+(1-t)*x0);
+      //
+      // t*(2*x2*y3-2*p0*y3-2*x3*y2+2*p0*y2+2*x0*y1-2*p0*y1-2*x1*y0+2*p0*y0+2*p1*x3-2*p1*x2+2*p1*x1-2*p1*x0)
+      // +t^2*(x2*y3-2*x1*y3+x0*y3-x3*y2+x1*y2+2*x3*y1-x2*y1-x0*y1-x3*y0+x1*y0)
+      // +x2*y3+2*x1*y3-x0*y3-2*p0*y3-x3*y2-x1*y2+2*p0*y2-2*x3*y1+x2*y1-x0*y1+2*p0*y1+x3*y0+x1*y0-2*p0*y0+2*p1*x3-2*p1*x2-2*p1*x1+2*p1*x0
+      // =0
+
+      // a*t^2 + b*t + c = 0
+      // (%o206) b = 2*(x2*y3+p0*(-y3+y2-y1+y0)-x3*y2+x0*y1-x1*y0+p1*(x3-x2+x1-x0))
+      // (%o207) a = x2*y3-x1*y3-x3*y2+x0*y2+x3*y1-x0*y1-x2*y0+x1*y0
+      // (%o208) c = x2*y3+x1*y3+p0*(-2*y3+2*y2+2*y1-2*y0)-x3*y2-x0*y2-x3*y1-x0*y1+x2*y0+x1*y0+p1*(2*x3-2*x2-2*x1+2*x0)
+      const double b = 2*(x2*y3-x3*y2+x0*y1-x1*y0 + p0 * (-y3+y2-y1+y0) + p1 * (x3-x2+x1-x0));
+      const double a = x2*y3-x1*y3-x3*y2+x0*y2+x3*y1-x0*y1-x2*y0+x1*y0;
+      const double c = x2*y3+x1*y3-x3*y2-x0*y2-x3*y1-x0*y1+x2*y0+x1*y0 + p0 * (-2*y3+2*y2+2*y1-2*y0) + p1 * (2*x3-2*x2-2*x1+2*x0);
+                   
+      // => t =  (-b +- sqrt ( b^2 - 4*a*c))/(2*a)
+      const  double q = b*b - 4 * a * c;
+      if (q<0) {
+         std::cout << "DEBUG failed to compute skewed coordinates for detector element " << detElementId
+                   << " localPos " << p0 << ", " << p1
+                   << std::endl;
+         return false;
+      }
+      else {
+         double t1 = (-b - sqrt(q))/(2*a);
+         double t2 = (-b + sqrt(q))/(2*a);
+         auto solution_s = [&](double t) {
+            return ((t+1)*x3+(t+1)*x2+(1-t)*x1+(1-t)*x0-4*p0)
+                  /((t+1)*x3+(-t-1)*x2+(t-1)*x1+(1-t)*x0);
+         };
+         auto the_test = [&](double s, double t) {
+            return std::make_pair(-(s*t*x3-t*x3+s*x3-x3-s*t*x2-t*x2-s*x2-x2+s*t*x1+t*x1-s*x1-x1-s*t*x0+t*x0+s*x0-x0)/4,
+                                  -(s*t*y3-t*y3+s*y3-y3-s*t*y2-t*y2-s*y2-y2+s*t*y1+t*y1-s*y1-y1-s*t*y0+t*y0+s*y0-y0)/4);
+         };
+         bool is_inside = ( (std::abs(solution_s(t1))<1 && std::abs(t1)<1) || (std::abs(solution_s(t2))<1 && std::abs(t2)<1));
+         constexpr auto sqr = [](double arg) {return arg*arg;};
+         if (verbose && !is_inside) {
+            std::cout << "DEBUG skewed coordinates for " << detElementId << " " << p0 << ", " << p1 << " -> "
+                      << solution_s(t1) << " , " << t1
+                      << ( (std::abs(solution_s(t1))<1 && std::abs(t1)<1) ? " * " : "")
+                      << " or " << solution_s(t2) << " , " << t2
+                      << ( (std::abs(solution_s(t2))<1 && std::abs(t2)<1) ? " * " : "")
+                      << ( (std::abs(solution_s(t1))<1 && std::abs(t1)<1) || (std::abs(solution_s(t2))<1 && std::abs(t2)<1) ? " inside" : " OUTSIDE")
+                      << std::endl;
+         }
+         auto test1 = the_test ( solution_s(t1),t1);
+         auto test2 = the_test ( solution_s(t2),t2);
+         double chi2_1= sqrt( sqr(test1.first-p0)/1e-5 + sqr(test1.second-p1)/1e-5 );
+         double chi2_2= sqrt( sqr(test2.first-p0)/1e-5 + sqr(test2.second-p1)/1e-5 );
+         if (chi2_1>1 || chi2_2>1) {
+            std::cout << "DEBUG skewed coordinates test " << detElementId << " " << p0 << ", " << p1 << " " 
+                      << test1.first << " , "  << test1.second
+                      <<  " (" << chi2_1 << ") "
+                      << " or "
+                      << test2.first << " , "  << test2.second
+                      <<  " (" << chi2_2 << ") "
+                      << std::endl;
+         }
+         return is_inside;
+      }
+   }
 }
 
 ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmContext& ctx) {
@@ -765,7 +857,7 @@ namespace {
             const Acts::Surface* min_surface=nullptr;
             double min_distance2=std::numeric_limits<double>::max();
 
-            final_volume->visitSurfaces([&ctx, &max_error, &global_pos, &min_distance2, &min_surface](const Acts::Surface* surface) {
+            final_volume->visitSurfaces([&ctx, &max_error, &global_pos, &min_distance2, &min_surface, detector_element_id](const Acts::Surface* surface) {
                   // if (surface->associatedLayer()
                   //     && surface->associatedLayer()->trackingVolume()
                   //     && std::regex_match(surface->associatedLayer()->trackingVolume()->volumeName(), ignore)) return;
@@ -784,8 +876,19 @@ namespace {
                   //    //                            << " trans " <<surface->transform(ctx.geoContext)
                   //           << std::endl;
                   const auto &trans = surface->transform(ctx.geoContext);
-                  Acts::BoundaryCheck bcheck(true);
-                  if (surface->bounds().inside(result.value(), bcheck)) {
+                  Acts::BoundaryCheck bcheck(true,true, 1e-5,1e-5);
+                  bool inside_bounds = surface->bounds().inside(result.value(), bcheck);
+                  // if (!inside_bounds ) {
+                  //    const Acts::AnnulusBounds * annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &surface->bounds() );
+                  //    if (annulus_bounds) {
+                  //       std::vector<Acts::Vector2> corners = annulus_bounds->corners();
+                  //       bool alt_inside_bounds = altBoundsCheck(detector_element_id, result.value(),corners);
+                  //       if (alt_inside_bounds != inside_bounds) {
+                  //          std::cout << "DEBUG bounds check disagree " << inside_bounds << " != " << alt_inside_bounds << std::endl;
+                  //       }
+                  //    }
+                  // }
+                  if (inside_bounds) {
                      Acts::Vector3 on_surface = surface->localToGlobal(ctx.geoContext,
                                                                        result.value(),
                                                                        dummy_momentum);
@@ -809,15 +912,57 @@ namespace {
                                << layer->geometryId();
                      min_surface->toStream(ctx.geoContext, std::cout);
                      std::cout << std::endl;
+                     const Acts::AnnulusBounds * annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &min_surface->bounds() );
+                     if (annulus_bounds) {
+                        Acts::Vector3 dummy_momentum{1.,1.,1.};
+                        std::vector<Acts::Vector2> corners = annulus_bounds->corners();
+                        unsigned int corner_i=0;
+                        for (const Acts::Vector2 &a_corner  : corners) {
+                           Acts::Vector3 glob = min_surface->localToGlobal(ctx.geoContext,
+                                                                           a_corner,
+                                                                           dummy_momentum);
+                           std::cout << " DEBUG surfaceBound corners " << detector_element_id << " " 
+                                     << corner_i << " : " << glob[0] << " , " << glob[1] << " , " << glob[2] << std::endl;
+                           ++corner_i;
+                        }
+                     }
 
                }
                if (layer) {
                   if (min_distance2>1e-4*1e-4) {
+                     Acts::Vector3 dummy_momentum{1.,1.,1.};
+                     Acts::Vector3 on_surface{0.,0.,0.};
+                     Acts::Result<Acts::Vector2> result = min_surface->globalToLocal(ctx.geoContext,
+                                                                                 global_pos,
+                                                                                 dummy_momentum,
+                                                                                 max_error);
+                     if (result .ok()) {
+                        on_surface = min_surface->localToGlobal(ctx.geoContext,
+                                                                result.value(),
+                                                                dummy_momentum);
+                     }
+
                      std::cout << "WARNING large matching distance for detector element " << detector_element_id << " mapped to "
                                << layer->geometryId()
                                << " pos: "
                                << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2]
+                               << " -> "
+                               << on_surface[0] << ", " << on_surface[1] << ", " << on_surface[2]
                                << " distance=" << sqrt(min_distance2) << std::endl;
+                     const Acts::AnnulusBounds * annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &min_surface->bounds() );
+                     if (annulus_bounds) {
+                        std::vector<Acts::Vector2> corners = annulus_bounds->corners();
+                        unsigned int corner_i=0;
+                        for (const Acts::Vector2 &a_corner  : corners) {
+                           Acts::Vector3 glob = min_surface->localToGlobal(ctx.geoContext,
+                                                                           a_corner,
+                                                                           dummy_momentum);
+                           std::cout << " DEBUG surfaceBound corners " << detector_element_id << " "
+                                     << corner_i << " : " << glob[0] << " , " << glob[1] << " , " << glob[2] << std::endl;
+                           ++corner_i;
+                        }
+                     }
+
                   }
 
                   match_distance_range[detector_element_id].update( sqrt(min_distance2) );
@@ -971,20 +1116,51 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
 
         measurements.emplace_back( Acts::Measurement<Acts::BoundIndices, 2>(sourceLink, indices, par, cov) );
 
+        unsigned int n_contributions=0;
+        unsigned int n_contributions_validBarcode=0;
+        double       energy=0.;
+        double       energy_validBarcode=0.;
+        unsigned int idx0=0;
+        const std::vector<std::vector<float> > &sim_hit_energy_list =sdo_info.sim_depositsEnergy->at(meas_i);
+
         for ( const std::vector<int>  &sim_hit_list : sdo_info.sim_depositsBarcode->at(meas_i) ) {
+           unsigned int idx1=0;
            for ( const int  &sim_barcode : sim_hit_list ) {
               try {
                  measurementParticlesMap.emplace_hint(measurementParticlesMap.end(),
                                                       measurementIdx,
                                                       findParticleBarCode(barcode_map, sim_barcode));
+                 if (idx0<sim_hit_energy_list.size() && idx1<sim_hit_energy_list[idx0].size()) {
+                    if (sim_barcode>0 && sim_barcode<std::numeric_limits<int>::max()-1) {
+                       ++n_contributions_validBarcode;
+                       energy_validBarcode += sim_hit_energy_list[idx0][idx1];
+                    }
+                    else {
+                       energy += sim_hit_energy_list[idx0][idx1];
+                       ++n_contributions;
+                    }
+                 }
+                 else {
+                    std::cout << "ERROR depostits: barcode and energy dimensions mismatch: "
+                              << idx0 << ", " << idx1
+                              << std::endl;
+                 }
               }
               catch (std::runtime_error &err) {
                  std::cout << "DEBUG missing target barcode for " << measurementIdx << " source=" << sim_barcode
                            << " : " << err.what()
                            << std::endl;
               }
+              ++idx1;
            }
+           ++idx0;
         }
+        energy += energy_validBarcode;
+        m_assoStat.at(kEnergyFraction).add(energy > 0 ? energy_validBarcode / energy : 0.);
+        m_assoStat.at(kEnergy).add(energy);
+        m_assoStat.at(kContributionsValidBarcode).add(n_contributions_validBarcode);
+        m_assoStat.at(kContributions).add(n_contributions_validBarcode + n_contributions);
+
      }
 
      for (unsigned int meas_i  : mismatch) {
@@ -1025,4 +1201,12 @@ void ActsExamples::RootDigiReader::showStat() const {
          std::cout << stat_list.first << " " << a_stat.first << " : " << a_stat.second << std::endl;
       }
    }
+   static const std::array<const char *,kNAssocStat>
+      label{"Energy", "Energy fraction w barcode","contributions", "Contributions w barcode"};
+   unsigned idx=0;
+   for (const Stat &a_stat :  m_assoStat) {
+      std::cout << label.at(idx) << " : " << a_stat << std::endl;
+      ++idx;
+   }
+
 }
