@@ -11,6 +11,7 @@
 #include "Acts/Plugins/Json/JsonMaterialDecorator.hpp"
 #include "Acts/Plugins/Json/MaterialMapJsonConverter.hpp"
 #include "Acts/Plugins/Json/ProtoDetectorJsonConverter.hpp"
+#include "Acts/Plugins/Json/TrackingGeometryJsonReader.hpp"
 #include "Acts/Plugins/Python/Utilities.hpp"
 #include "ActsExamples/Io/Json/JsonMaterialWriter.hpp"
 #include "ActsExamples/Io/Json/JsonSurfacesWriter.hpp"
@@ -133,5 +134,24 @@ void addJson(Context& ctx) {
           return pDetector;
         }));
   }
+
+  {
+    auto cls =
+        py::class_<TrackingGeometryJsonReader>(mex, "TrackingGeometryJsonReader")
+       .def(py::init<const TrackingGeometryJsonReader::Config&>(),
+                 py::arg("config"))
+       .def("read", &TrackingGeometryJsonReader::read);
+       //            .def_property_readonly("config", &TrackingGeometryJsonReader::m_cfg);
+
+    auto c =
+        py::class_<TrackingGeometryJsonReader::Config>(cls, "Config").def(py::init<>());
+
+    ACTS_PYTHON_STRUCT_BEGIN(c, TrackingGeometryJsonReader::Config);
+    ACTS_PYTHON_MEMBER(detectorName);
+    ACTS_PYTHON_MEMBER(toolLogLevel);
+    ACTS_PYTHON_MEMBER(logLevel);
+    ACTS_PYTHON_STRUCT_END();
+  }
+
 }
 }  // namespace Acts::Python

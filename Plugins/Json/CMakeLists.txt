@@ -1,4 +1,5 @@
 include(ActsTargetLinkLibrariesSystem)
+add_definitions(-g -O0)
 
 add_library(
   ActsPluginJson SHARED
@@ -11,7 +12,8 @@ add_library(
   src/SurfaceJsonConverter.cpp
   src/UtilitiesJsonConverter.cpp
   src/VolumeBoundsJsonConverter.cpp
-  src/VolumeJsonConverter.cpp)
+  src/VolumeJsonConverter.cpp
+  src/TrackingGeometryJsonReader.cpp)
 target_include_directories(
   ActsPluginJson
   PUBLIC
