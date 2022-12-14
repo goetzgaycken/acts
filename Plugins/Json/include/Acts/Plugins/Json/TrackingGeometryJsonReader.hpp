@@ -12,6 +12,7 @@
 #include "Acts/Utilities/Logger.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/Geometry/ProtoDetector.hpp"
+#include "Acts/Geometry/VolumeBounds.hpp"
 
 #include <memory>
 #include <array>
@@ -20,6 +21,8 @@
 
 
 namespace Acts {
+
+
 class TrackingGeometryJsonReader
 {
 public:
@@ -35,8 +38,16 @@ public:
       return static_cast<enum_t>(enum_iter - enum_names.begin());
    }
 
-   struct Element {
-      Element(const std::string a_name, unsigned int an_id=std::numeric_limits<unsigned int>::max())
+   static float scale(float a, float b) {
+      float tmp=std::abs(a+b);
+      return tmp == 0. ? 2. : tmp;
+   }
+   static bool floatsAgree(float a, float b) {
+      return std::abs(a-b) < std::numeric_limits<float>::epsilon() * scale(a,b);
+   }
+
+   struct VolumeInfo {
+      VolumeInfo(const std::string a_name, unsigned int an_id=std::numeric_limits<unsigned int>::max())
          : id(an_id) {proto_volume.name=a_name; }
       /// the name given to the volume
       Acts::ProtoVolume proto_volume;
@@ -46,6 +57,32 @@ public:
       std::vector<unsigned int> childs;
       /// parent index or UINT_MAX
       unsigned int parent = std::numeric_limits<unsigned int>::max();
+
+      std::unique_ptr<Acts::VolumeBounds> volumeBounds;
+      Acts::Transform3                    volumeTransform;
+
+      struct Domain {
+         enum EType {kOpen, kClosed, kNRangeTypes};
+         Domain() = default;
+         Domain(float a_min, float a_max)
+            : min(std::min(a_min,a_max)), max(std::max(a_min,a_max)) {}
+         float min = -std::numeric_limits<float>::max();
+         float max = std::numeric_limits<float>::max();
+
+         bool operator==(const Domain &a_domain) const {
+            return floatsAgree(max,a_domain.max) && floatsAgree(min,a_domain.min);
+         }
+         bool operator!=(const Domain &a_domain) const {
+            return not operator==(a_domain);
+         }
+         bool overlaps(const Domain &a_domain) const {
+            return min < a_domain.max && max > a_domain.min;
+         }
+      };
+
+      enum EDomainTypes { eR, eZ, eNDomains};
+      std::array<Domain, eNDomains> domains;
+
       enum EBinningVariable {kR, kPhi, kZ, kNBinningVariables};
       /// helper class to hold binning description
       struct Binning {
@@ -73,24 +110,21 @@ public:
             float tmp=std::abs(a+b);
             return tmp == 0. ? 2. : tmp;
          }
-         static bool floatsAgree(float a, float b) {
-            return std::abs(a-b) < std::numeric_limits<float>::epsilon() * scale(a,b);
-         }
          bool overlaps(const Binning &a_binning) const {
             return min < a_binning.max && max > a_binning.min;
          }
       };
       std::array<Binning, kNBinningVariables> binning {};
-      unsigned short setBinningMask = 0;
+      unsigned short setDomainMask = 0;
       unsigned short noOverlapMask = 0;
 
       bool processed = false;
    };
 
-   static Element &registerElement(unsigned int volume_id,
-                                   const std::string &name,
-                                   std::unordered_map<unsigned int, Element > &volume_name_map,
-                                   std::unordered_map<std::string, unsigned int > &name_map);
+   static VolumeInfo &registerVolume(unsigned int volume_id,
+                                     const std::string &name,
+                                     std::unordered_map<unsigned int, VolumeInfo > &volume_name_map,
+                                     std::unordered_map<std::string, unsigned int > &name_map);
 public:
    static std::unique_ptr<Acts::TrackingGeometry> trackingGeometry(const nlohmann::json& tracking_geometry_description);
 };
