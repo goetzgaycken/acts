@@ -75,7 +75,9 @@ Acts::KDTreeTrackingGeometryBuilder::translateVolume(
     for (auto& cVolume : ptVolume.constituentVolumes) {
       auto dtVolume = translateVolume(cCache, gctx, kdt, cVolume,
                                       indent + m_cfg.hierarchyIndent);
-      translatedVolumes.push_back(dtVolume);
+      if (dtVolume) {
+         translatedVolumes.push_back(dtVolume);
+      }
     }
     // Make a container volume
     auto tVolume = m_cfg.trackingVolumeHelper->createContainerTrackingVolume(
