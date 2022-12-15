@@ -22,10 +22,27 @@
 
 namespace Acts {
 
-
 class TrackingGeometryJsonReader
 {
 public:
+
+   struct Config {
+      /// Name of the detector being build
+      std::string detectorName = "";
+      /// Logging level of the child tools
+      Acts::Logging::Level toolLogLevel = Acts::Logging::INFO;
+      /// Logging level
+      Acts::Logging::Level logLevel = Acts::Logging::INFO;
+   };
+   TrackingGeometryJsonReader(const Config& cfg)  : m_cfg(cfg) {}
+
+   std::shared_ptr<const Acts::TrackingGeometry> createTrackingGeometry(const nlohmann::json& tracking_geometry_description);
+
+protected:
+   Config m_cfg;
+
+   Acts::ProtoDetector createProtoDetector(const nlohmann::json& tracking_geometry_description);
+   std::vector<std::shared_ptr<Acts::Surface>> createSurfaces(const nlohmann::json& tracking_geometry_description);
 
    template <typename enum_t, class array_t>
    static enum_t getNamedEnum(const array_t &enum_names, const std::string &the_name, const std::string &error_head="Unknwon enum: ") {
@@ -83,6 +100,7 @@ public:
       enum EDomainTypes { eR, eZ, eNDomains};
       std::array<Domain, eNDomains> domains;
 
+      // @TODO remove :
       enum EBinningVariable {kR, kPhi, kZ, kNBinningVariables};
       /// helper class to hold binning description
       struct Binning {
@@ -94,8 +112,8 @@ public:
          float max = std::numeric_limits<float>::max();
          EType type = kNRangeTypes;
          bool isClosed() const {
-            float a_min = min; 
-            float a_max = max; 
+            float a_min = min;
+            float a_max = max;
             if (a_min<=-M_PI) a_min+=2*M_PI;
             if (a_max>M_PI)   a_max-=2*M_PI;
             return  (a_max-a_min>M_PI && std::abs(a_max-a_min)< 2*std::numeric_limits<float>::epsilon());
@@ -115,6 +133,8 @@ public:
          }
       };
       std::array<Binning, kNBinningVariables> binning {};
+      //  remove until here
+
       unsigned short setDomainMask = 0;
       unsigned short noOverlapMask = 0;
 
@@ -125,7 +145,9 @@ public:
                                      const std::string &name,
                                      std::unordered_map<unsigned int, VolumeInfo > &volume_name_map,
                                      std::unordered_map<std::string, unsigned int > &name_map);
-public:
-   static std::unique_ptr<Acts::TrackingGeometry> trackingGeometry(const nlohmann::json& tracking_geometry_description);
+
+   static void dumpMap(std::unordered_map<unsigned int, Acts::TrackingGeometryJsonReader::VolumeInfo > &volume_name_map);
+
 };
 }
+

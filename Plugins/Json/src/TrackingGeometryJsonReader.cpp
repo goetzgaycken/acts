@@ -5,9 +5,18 @@
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/Geometry/ProtoDetector.hpp"
 #include "Acts/Geometry/CylinderVolumeBounds.hpp"
+#include "Acts/Geometry/CylinderVolumeHelper.hpp"
+
 #include "Acts/Plugins/Json/TrackingGeometryJsonReader.hpp"
 #include "Acts/Plugins/Json/VolumeBoundsJsonConverter.hpp"
 #include "Acts/Plugins/Json/AlgebraJsonConverter.hpp"
+#include "Acts/Plugins/Json/SurfaceJsonConverter.hpp"
+
+#include "Acts/Geometry/KDTreeTrackingGeometryBuilder.hpp"
+#include "Acts/Geometry/LayerArrayCreator.hpp"
+#include "Acts/Geometry/LayerCreator.hpp"
+#include "Acts/Geometry/SurfaceArrayCreator.hpp"
+#include "Acts/Geometry/TrackingVolumeArrayCreator.hpp"
 
 #include <memory>
 #include <array>
@@ -15,19 +24,17 @@
 #include <limits>
 #include <stdexcept>
 
-namespace dbg {
-   void dumpMap(std::unordered_map<unsigned int, Acts::TrackingGeometryJsonReader::VolumeInfo > &volume_name_map) {
-      for (const std::pair<const unsigned int, Acts::TrackingGeometryJsonReader::VolumeInfo > &elm : volume_name_map) {
-         std::cout << elm.first << " -> " << elm.second.proto_volume.name << " " <<elm.second.id
-                   << " childs  ";
-         for (unsigned int a_child :  elm.second.childs) {
-            std::cout << " " << a_child;
-         }
-
-         std::cout  << std::endl;
+void Acts::TrackingGeometryJsonReader::dumpMap(std::unordered_map<unsigned int, Acts::TrackingGeometryJsonReader::VolumeInfo > &volume_name_map) {
+   for (const std::pair<const unsigned int, Acts::TrackingGeometryJsonReader::VolumeInfo > &elm : volume_name_map) {
+      std::cout << elm.first << " -> " << elm.second.proto_volume.name << " " <<elm.second.id
+                << " childs  ";
+      for (unsigned int a_child :  elm.second.childs) {
+         std::cout << " " << a_child;
       }
+      std::cout  << std::endl;
    }
 }
+
 namespace Acts {
 TrackingGeometryJsonReader::VolumeInfo &
 TrackingGeometryJsonReader::registerVolume(unsigned int volume_id,
@@ -90,7 +97,8 @@ TrackingGeometryJsonReader::registerVolume(unsigned int volume_id,
    return insert_result.first->second;
 }
 
-std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeometry(const nlohmann::json& tracking_geometry_description) {
+Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohmann::json& tracking_geometry_description) {
+   Acts::ProtoDetector detector;
    nlohmann::json volumes = tracking_geometry_description["Volumes"];
    int version = volumes["acts-geometry-hierarchy-map"]["format-version"].get<int>();
    static std::array<int,1> supported_versions{0};
@@ -103,6 +111,12 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
    static const std::array<std::string, VolumeInfo::Binning::kNRangeTypes> binning_range_types {
       std::string("open"),
       std::string("closed")};
+   static const std::map<std::string, Acts::Surface::SurfaceType> supported_layer_types {
+      { std::string("Disc"), Acts::Surface::SurfaceType::Disc },
+      { std::string("Cylinder"), Acts::Surface::SurfaceType::Cylinder }
+   };
+
+
    std::unordered_map<std::string, unsigned int > name_map;
    std::unordered_map<unsigned int, VolumeInfo> hierarchy;
    nlohmann::json volume_list  = volumes.at("entries");
@@ -123,14 +137,14 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
       Acts::from_json(value["transform"], element.volumeTransform);
       if (   not floatsAgree(element.volumeTransform.translation()[0],0.)
           or not floatsAgree(element.volumeTransform.translation()[1],0.)) {
-         //         std::cout << "ERROR not a z-axis aligned tracking volume " << element.proto_volume.name << std::endl;
+         std::cout << "ERROR not a z-axis aligned tracking volume " << element.proto_volume.name << std::endl;
          is_z_axis_aligned = false;
       }
 
       const Acts::CylinderVolumeBounds *cylinder_bounds=dynamic_cast<const Acts::CylinderVolumeBounds *>(element.volumeBounds.get());
 
       if (not element.volumeBounds or element.volumeBounds->type() != Acts::VolumeBounds::eCylinder or not cylinder_bounds) {
-         //         std::cout << "ERROR not a cylinder tracking volume " << element.proto_volume.name << std::endl;
+         std::cout << "ERROR not a cylinder tracking volume " << element.proto_volume.name << std::endl;
          is_cylinder=false;
       }
       if (is_cylinder and is_z_axis_aligned) {
@@ -141,7 +155,19 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
                                                       element.volumeTransform.translation()[2]
                                                     + cylinder_bounds->get(Acts::CylinderVolumeBounds::eHalfLengthZ));
       }
-
+      if (value.contains("layerType")) {
+         std::map<std::string, Acts::Surface::SurfaceType>::const_iterator
+            layer_type = supported_layer_types.find(value["layerType"].get<std::string>());
+         if (layer_type != supported_layer_types.end()) {
+            element.proto_volume.layerType = layer_type->second;
+            std::cout << "DEBUG layer type for "<< element.proto_volume.name << " "  << layer_type->first << " -> "  << static_cast<unsigned int>(layer_type->second) 
+                      << std::endl;
+         }
+         else {
+            std::cout << "ERROR unsupported layer type for  " << element.proto_volume.name
+                      << " (layer type " << value["layerType"] << ")"<< std::endl;
+         }
+      }
 
       // for (nlohmann::json &a_binning : value["material"]["binUtility"]["binningdata"]) {
       //    element.binning.at(getNamedEnum<unsigned short>(binning_variables,
@@ -154,7 +180,7 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
       //                                                                "Unknown binning option: " ));
       // }
    }
-   if (not is_cylinder or not is_z_axis_aligned) return std::unique_ptr<Acts::TrackingGeometry>{};
+   if (not is_cylinder or not is_z_axis_aligned) return detector;
 
    // for( nlohmann::json a_volume : volume_list) {
    //    unsigned int volume_id = a_volume["volume"].get<unsigned int>();
@@ -242,10 +268,6 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
          an_element.proto_volume.constituentVolumes.reserve(an_element.childs.size());
          //         std::cout << "DEBUG " << an_element.proto_volume.name << " childs:";
          // @TODO sort childs by z or r
-         for(unsigned int child_i=0; child_i<an_element.childs.size(); ++child_i) {
-            an_element.proto_volume.constituentVolumes.push_back( hierarchy.at(an_element.childs.at(child_i) ).proto_volume);
-            //            std::cout << " " << hierarchy.at(an_element.childs.at(child_i) ).proto_volume.name;
-         }
          //         std::cout << std::endl;
          for(unsigned int domain_i =0 ; domain_i < an_element.domains.size(); ++domain_i) {
             if ( (an_element.setDomainMask & (1<<domain_i)) ) {
@@ -273,6 +295,13 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
             }
             an_element.processed = childs_processed;
          }
+
+         an_element.proto_volume.constituentVolumes.reserve( an_element.childs.size() );
+         for(unsigned int child_i=0; child_i<an_element.childs.size(); ++child_i) {
+            an_element.proto_volume.constituentVolumes.push_back( std::move(hierarchy.at(an_element.childs.at(child_i) ).proto_volume) );
+            //            std::cout << " " << hierarchy.at(an_element.childs.at(child_i) ).proto_volume.name;
+         }
+
          if (an_element.parent < hierarchy.size()) {
             if (std::find(element_queue.begin(),element_queue.end(),an_element.parent) == element_queue.end()) {
                element_queue.push_back(an_element.parent);
@@ -292,7 +321,109 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
          std::cout << std::endl;
       }
    }
+   if (world) {
+      detector.worldVolume = std::move(world->proto_volume);
+   }
+   return detector;
+}
 
-   return std::unique_ptr<Acts::TrackingGeometry>{};
+
+std::vector<std::shared_ptr<Acts::Surface>>
+TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geometry_description) {
+   nlohmann::json surfaces_in = tracking_geometry_description["Surfaces"];
+   int version = surfaces_in["acts-geometry-hierarchy-map"]["format-version"].get<int>();
+   static std::array<int,1> supported_versions{0};
+   if (std::find(supported_versions.begin(),supported_versions.end(), version) == supported_versions.end()) {
+      throw std::runtime_error("Unsupported input format.");
+   }
+   nlohmann::json surface_list  = surfaces_in.at("entries");
+
+   std::vector<std::shared_ptr<Acts::Surface>> surfaces_out;
+   surfaces_out.reserve( surface_list.size() );
+   unsigned int counter_i=0;
+   for( nlohmann::json a_surface : surface_list) {
+      //      unsigned int volume_id = a_volume["volume"].get<unsigned int>();
+      /// @return a shared_ptr to a surface object for type polymorphism
+      surfaces_out.push_back( surfaceFromJson(a_surface["value"]) );
+      if (not surfaces_out.back().get()) {
+         uint64_t geo_id = std::numeric_limits<uint64_t>::max();
+         uint64_t det_id = std::numeric_limits<uint64_t>::max();
+         try {
+            geo_id = a_surface["value"]["geo_id"].get<uint64_t>();
+         }
+         catch (...) {
+         }
+         try {
+            det_id = a_surface["value"]["detID"].get<uint64_t>();
+         }
+         catch (...) {
+         }
+         std::cout << "WARNING failed to create surface " << counter_i << " IDs geo: " << geo_id
+                   << " detector " << det_id
+                   << std::endl;
+         surfaces_out.pop_back();
+      }
+      ++counter_i;
+   }
+   return surfaces_out;
+
+}
+
+std::shared_ptr<const Acts::TrackingGeometry>
+TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& tracking_geometry_description) {
+   Acts::ProtoDetector detector(  createProtoDetector(tracking_geometry_description) );
+   std::cout << detector.toString("") << std::endl;
+   std::vector<std::shared_ptr<Acts::Surface>> surfaces( createSurfaces( tracking_geometry_description) );
+
+   // @TODO copied from Examples/Detectors/Geant4Detector/src/Geant4DetectorService.cpp.
+   //    Move to a helper function ?
+   Acts::GeometryContext tContext;
+
+   // Surface array creatorr
+   auto surfaceArrayCreator =
+      std::make_shared<const Acts::SurfaceArrayCreator>(
+          Acts::SurfaceArrayCreator::Config(),
+          Acts::getDefaultLogger("SurfaceArrayCreator", m_cfg.toolLogLevel));
+   // Layer Creator
+   Acts::LayerCreator::Config lcConfig;
+   lcConfig.surfaceArrayCreator = surfaceArrayCreator;
+   auto layerCreator = std::make_shared<Acts::LayerCreator>(
+       lcConfig, Acts::getDefaultLogger("LayerCreator", m_cfg.toolLogLevel));
+   // Layer array creator
+   Acts::LayerArrayCreator::Config lacConfig;
+   auto layerArrayCreator = std::make_shared<const Acts::LayerArrayCreator>(
+       lacConfig,
+       Acts::getDefaultLogger("LayerArrayCreator", m_cfg.toolLogLevel));
+   // Tracking volume array creator
+   Acts::TrackingVolumeArrayCreator::Config tvacConfig;
+   auto tVolumeArrayCreator =
+      std::make_shared<const Acts::TrackingVolumeArrayCreator>(
+          tvacConfig, Acts::getDefaultLogger("TrackingVolumeArrayCreator",
+                                             m_cfg.toolLogLevel));
+   // configure the cylinder volume helper
+   Acts::CylinderVolumeHelper::Config cvhConfig;
+   cvhConfig.layerArrayCreator = layerArrayCreator;
+   cvhConfig.trackingVolumeArrayCreator = tVolumeArrayCreator;
+   auto cylinderVolumeHelper =
+      std::make_shared<const Acts::CylinderVolumeHelper>(
+          cvhConfig,
+          Acts::getDefaultLogger("CylinderVolumeHelper", m_cfg.toolLogLevel));
+
+   // The KDT tracking geometry builder
+   Acts::KDTreeTrackingGeometryBuilder::Config kdtgConfig;
+   kdtgConfig.layerCreator = layerCreator;
+   kdtgConfig.trackingVolumeHelper = cylinderVolumeHelper;
+
+   kdtgConfig.surfaces = std::move(surfaces);
+   kdtgConfig.protoDetector = std::move(detector);
+
+   // Make the builder
+   auto kdtTrackingGeometryBuilder = Acts::KDTreeTrackingGeometryBuilder(
+      kdtgConfig, Acts::getDefaultLogger("KDTreeTrackingGeometryBuilder",
+                                         m_cfg.toolLogLevel));
+
+   return std::shared_ptr<const Acts::TrackingGeometry>(
+      kdtTrackingGeometryBuilder.trackingGeometry(tContext).release());
+
 }
 }
