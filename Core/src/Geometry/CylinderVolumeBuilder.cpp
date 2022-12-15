@@ -387,6 +387,9 @@ Acts::CylinderVolumeBuilder::trackingVolume(
       }
     }
 
+    std::cout << "DEBUG CreateTrackingVolume " << m_cfg.volumeName << endcapName
+    << endcapConfig.zMin << " ... " << endcapConfig.zMax
+    << std::endl;
     // No ring layout - return single volume
     return tvHelper->createTrackingVolume(
         gctx, endcapConfig.layers, centralConfig.volumes, m_cfg.volumeMaterial,
