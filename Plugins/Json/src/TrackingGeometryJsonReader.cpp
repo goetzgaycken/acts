@@ -69,7 +69,7 @@ TrackingGeometryJsonReader::registerVolume(unsigned int volume_id,
                std::pair<std::unordered_map<std::string, unsigned int>::iterator, bool>
                   insert_child_key = name_map.insert( std::make_pair(child_name, name_map.size()));
                unsigned int child_key = insert_child_key.first->second;
-               std::cout << "DEBUG child " << child_key << " <" << child_name << ">" << std::endl;
+               //               std::cout << "DEBUG child " << child_key << " <" << child_name << ">" << std::endl;
                std::pair<std::unordered_map<unsigned int, VolumeInfo>::iterator, bool>
                   child_insert_result = volume_map.insert( std::make_pair(child_key,VolumeInfo(child_name)));
 
@@ -123,14 +123,14 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
       Acts::from_json(value["transform"], element.volumeTransform);
       if (   not floatsAgree(element.volumeTransform.translation()[0],0.)
           or not floatsAgree(element.volumeTransform.translation()[1],0.)) {
-         std::cout << "ERROR not a z-axis aligned tracking volume " << element.proto_volume.name << std::endl;
+         //         std::cout << "ERROR not a z-axis aligned tracking volume " << element.proto_volume.name << std::endl;
          is_z_axis_aligned = false;
       }
 
       const Acts::CylinderVolumeBounds *cylinder_bounds=dynamic_cast<const Acts::CylinderVolumeBounds *>(element.volumeBounds.get());
 
       if (not element.volumeBounds or element.volumeBounds->type() != Acts::VolumeBounds::eCylinder or not cylinder_bounds) {
-         std::cout << "ERROR not a cylinder tracking volume " << element.proto_volume.name << std::endl;
+         //         std::cout << "ERROR not a cylinder tracking volume " << element.proto_volume.name << std::endl;
          is_cylinder=false;
       }
       if (is_cylinder and is_z_axis_aligned) {
@@ -232,38 +232,37 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
       element_queue.pop_front();
       VolumeInfo &an_element = hierarchy.at(element_idx);
 
-      bool processed=true;
+      bool childs_processed=true;
       for(unsigned int child_i=0; child_i<an_element.childs.size(); ++child_i) {
          VolumeInfo &a_child_element = hierarchy.at(an_element.childs.at(child_i) );
-         processed &= a_child_element.processed;
+         childs_processed &= a_child_element.processed;
          if (not an_element.processed) { break; }
       }
-      an_element.processed = processed;
-      if (processed ) {
+      if (childs_processed ) {
          an_element.proto_volume.constituentVolumes.reserve(an_element.childs.size());
-         std::cout << "DEBUG " << an_element.proto_volume.name << " childs:";
+         //         std::cout << "DEBUG " << an_element.proto_volume.name << " childs:";
          // @TODO sort childs by z or r
          for(unsigned int child_i=0; child_i<an_element.childs.size(); ++child_i) {
             an_element.proto_volume.constituentVolumes.push_back( hierarchy.at(an_element.childs.at(child_i) ).proto_volume);
-            std::cout << " " << hierarchy.at(an_element.childs.at(child_i) ).proto_volume.name;
+            //            std::cout << " " << hierarchy.at(an_element.childs.at(child_i) ).proto_volume.name;
          }
-         std::cout << std::endl;
+         //         std::cout << std::endl;
          for(unsigned int domain_i =0 ; domain_i < an_element.domains.size(); ++domain_i) {
             if ( (an_element.setDomainMask & (1<<domain_i)) ) {
                an_element.proto_volume.extent.set(acts_domain_type.at(domain_i),
                                                    an_element.domains.at(domain_i).min,
                                                    an_element.domains.at(domain_i).max);
-               std::cout << "DEBUG " << an_element.proto_volume.name << " set domain "
-                         << domain_i << " (" << acts_domain_type.at(domain_i) << ")"
-                         << " " << an_element.domains.at(domain_i).min
-                         << " .. " << an_element.domains.at(domain_i).max
-                         << std::endl;
+               // std::cout << "DEBUG " << an_element.proto_volume.name << " set domain "
+               //           << domain_i << " (" << acts_domain_type.at(domain_i) << ")"
+               //           << " " << an_element.domains.at(domain_i).min
+               //           << " .. " << an_element.domains.at(domain_i).max
+               //           << std::endl;
             }
             if (!an_element.childs.empty()) {
                if (    (an_element.noOverlapMask & (1<<domain_i) ) ) {
-                  std::cout << "DEBUG " << an_element.proto_volume.name << " set constituentDomain "
-                            << " " << domain_i << "(" << acts_domain_type.at(domain_i) << ")"
-                            << std::endl;
+                  // std::cout << "DEBUG " << an_element.proto_volume.name << " set constituentDomain "
+                  //           << " " << domain_i << "(" << acts_domain_type.at(domain_i) << ")"
+                  //           << std::endl;
 
                   an_element.proto_volume.constituentBinning = {
                      Acts::BinningData(Acts::open,
@@ -272,6 +271,7 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
 
                }
             }
+            an_element.processed = childs_processed;
          }
          if (an_element.parent < hierarchy.size()) {
             if (std::find(element_queue.begin(),element_queue.end(),an_element.parent) == element_queue.end()) {
@@ -285,7 +285,6 @@ std::unique_ptr<Acts::TrackingGeometry> TrackingGeometryJsonReader::trackingGeom
    }
    for (const std::pair<const unsigned int, VolumeInfo> &element : hierarchy) {
       if (not element.second.processed) {
-         
          std::cout << "DEBUG unprocessed volume " << element.second.proto_volume.name << " childs:";
          for(unsigned int child_i=0; child_i<element.second.childs.size(); ++child_i) {
             std::cout << " " << hierarchy.at(element.second.childs.at(child_i) ).proto_volume.name;
