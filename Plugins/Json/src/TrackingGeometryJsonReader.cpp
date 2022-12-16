@@ -159,10 +159,14 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohma
          std::map<std::string, Acts::Surface::SurfaceType>::const_iterator
             layer_type = supported_layer_types.find(value["layerType"].get<std::string>());
          if (layer_type != supported_layer_types.end()) {
+            if (layer_type->second!=Acts::Surface::SurfaceType::Cylinder
+                || element.domains.at(0).min>0.) {
+               
             element.proto_volume.layerType = layer_type->second;
             std::cout << "DEBUG layer type for "<< element.proto_volume.name << " "
                       << layer_type->first << " -> "  << static_cast<unsigned int>(layer_type->second) 
                       << std::endl;
+            }
          }
          else {
             std::cout << "ERROR unsupported layer type for  " << element.proto_volume.name
