@@ -139,6 +139,7 @@ protected:
       unsigned short noOverlapMask = 0;
 
       bool processed = false;
+      bool moved = false;
    };
 
    static VolumeInfo &registerVolume(unsigned int volume_id,

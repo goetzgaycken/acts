@@ -160,7 +160,8 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohma
             layer_type = supported_layer_types.find(value["layerType"].get<std::string>());
          if (layer_type != supported_layer_types.end()) {
             element.proto_volume.layerType = layer_type->second;
-            std::cout << "DEBUG layer type for "<< element.proto_volume.name << " "  << layer_type->first << " -> "  << static_cast<unsigned int>(layer_type->second) 
+            std::cout << "DEBUG layer type for "<< element.proto_volume.name << " "
+                      << layer_type->first << " -> "  << static_cast<unsigned int>(layer_type->second) 
                       << std::endl;
          }
          else {
@@ -203,14 +204,20 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohma
          for(unsigned int child_i=0; child_i<element.second.childs.size(); ++child_i) {
             unsigned int child_idx = element.second.childs.at(child_i);
             VolumeInfo &a_child_element = hierarchy.at(child_idx);
-            for(unsigned int domain_i =0 ; domain_i < a_child_element.domains.size(); ++domain_i) {
+            for(unsigned int domain_i =0 ;
+                domain_i < a_child_element.domains.size();
+                ++domain_i) {
                assert( a_child_element.domain.size() == element.second.domains.size());
-               if (a_child_element.domains.at(domain_i) != element.second.domains.at(domain_i)) {
+               if ( a_child_element.domains.at(domain_i)
+                   != element.second.domains.at(domain_i)) {
                   non_identical_domain_mask |= (1<<domain_i);
                }
-               for(unsigned int other_child_i=0; other_child_i<child_i; ++other_child_i) {
-                  VolumeInfo &other_child_element = hierarchy.at( element.second.childs.at(other_child_i) );
-                  if (a_child_element.domains.at(domain_i).overlaps( other_child_element.domains.at(domain_i) )) {
+               for(unsigned int other_child_i=0;
+                   other_child_i<child_i; ++other_child_i) {
+                  VolumeInfo &other_child_element
+                     = hierarchy.at( element.second.childs.at(other_child_i) );
+                  if (a_child_element.domains.at(domain_i).overlaps(
+                         other_child_element.domains.at(domain_i) )) {
                      child_domain_overlaps |= (1<<domain_i);
                      break;
                   }
@@ -223,6 +230,22 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohma
          }
          unsigned int same_domain_mask = non_overlapping_domains & (~non_identical_domain_mask);
          non_overlapping_domains &= ~child_domain_overlaps;
+         std::cout << "DEBUG "
+                   << element.second.proto_volume.name << " no-overlaps:";
+         for(unsigned int domain_i =0 ; domain_i < element.second.domains.size();
+             ++domain_i) {
+            if ((1<<domain_i) & non_overlapping_domains) {
+               std::cout << " " << domain_i;
+            }
+         }
+         std::cout << " same:";
+         for(unsigned int domain_i =0 ; domain_i < element.second.domains.size();
+             ++domain_i) {
+            if ((1<<domain_i) & same_domain_mask) {
+               std::cout << " " << domain_i;
+            }
+         }
+         std::cout << std::endl;
 
          for(unsigned int child_i=0; child_i<element.second.childs.size(); ++child_i) {
             VolumeInfo &a_child_element = hierarchy.at( element.second.childs.at(child_i) );
@@ -232,6 +255,7 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohma
          }
          // set domain if domain is identical to the domain definition of all childs;
          element.second.setDomainMask |= same_domain_mask;
+         element.second.setDomainMask |= non_overlapping_domains;
          element.second.noOverlapMask  |= non_overlapping_domains;
       }
       //         if (element.second.parent < hierarchy.size()) {
@@ -250,6 +274,11 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohma
    // take element from front deque if childs have been processed if yes
    // add childs as constituents, mark as processed, put parent to end of queue
    // if childs are not processed put to end of queue
+   for(unsigned int child_i=0; child_i<hierarchy.size(); ++child_i) {
+      VolumeInfo &a_child_element = hierarchy.at(child_i);
+      std::cout << "#" << child_i << " " << a_child_element.proto_volume.name << std::endl;
+   }
+   std::cout << std::endl;
 
    static std::array<Acts::BinningValue, VolumeInfo::eNDomains> acts_domain_type
       {Acts::binR, Acts::binZ}; // must match order in VolumeInfos::EDomainTypes
@@ -257,34 +286,55 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohma
       unsigned int element_idx = element_queue.front();
       element_queue.pop_front();
       VolumeInfo &an_element = hierarchy.at(element_idx);
-
+      {
+         std::cout << "DEBUG processing ";
+         const VolumeInfo &tmp = an_element;
+         if (tmp.moved) {
+            std::cout << "(";
+         }
+         std::cout << " #" << element_idx;
+         if (tmp.processed) {
+            std::cout << "*";
+         }
+         if (tmp.moved) {
+            std::cout << ")";
+         }
+         std::cout << std::endl;
+      }
+      if (an_element.moved) {
+         std::cout << "ERROR processing moved element " << element_idx << std::endl;
+      }
       bool childs_processed=true;
       for(unsigned int child_i=0; child_i<an_element.childs.size(); ++child_i) {
          VolumeInfo &a_child_element = hierarchy.at(an_element.childs.at(child_i) );
          childs_processed &= a_child_element.processed;
-         if (not an_element.processed) { break; }
+         if (not childs_processed) { break; }
       }
       if (childs_processed ) {
-         an_element.proto_volume.constituentVolumes.reserve(an_element.childs.size());
-         //         std::cout << "DEBUG " << an_element.proto_volume.name << " childs:";
          // @TODO sort childs by z or r
-         //         std::cout << std::endl;
+         an_element.proto_volume.constituentVolumes.reserve(an_element.childs.size());
+         std::cout << "DEBUG " << an_element.proto_volume.name << " childs:";
+         for(unsigned int child_i=0; child_i<an_element.childs.size(); ++child_i) {
+            VolumeInfo &a_child_element = hierarchy.at(an_element.childs.at(child_i) );
+            std::cout << " " << a_child_element.proto_volume.name;
+         }
+         std::cout << std::endl;
          for(unsigned int domain_i =0 ; domain_i < an_element.domains.size(); ++domain_i) {
             if ( (an_element.setDomainMask & (1<<domain_i)) ) {
                an_element.proto_volume.extent.set(acts_domain_type.at(domain_i),
                                                    an_element.domains.at(domain_i).min,
                                                    an_element.domains.at(domain_i).max);
-               // std::cout << "DEBUG " << an_element.proto_volume.name << " set domain "
-               //           << domain_i << " (" << acts_domain_type.at(domain_i) << ")"
-               //           << " " << an_element.domains.at(domain_i).min
-               //           << " .. " << an_element.domains.at(domain_i).max
-               //           << std::endl;
+               std::cout << "DEBUG " << an_element.proto_volume.name << " set domain "
+                         << domain_i << " (" << acts_domain_type.at(domain_i) << ")"
+                          << " " << an_element.domains.at(domain_i).min
+                          << " .. " << an_element.domains.at(domain_i).max
+                         << std::endl;
             }
             if (!an_element.childs.empty()) {
                if (    (an_element.noOverlapMask & (1<<domain_i) ) ) {
-                  // std::cout << "DEBUG " << an_element.proto_volume.name << " set constituentDomain "
-                  //           << " " << domain_i << "(" << acts_domain_type.at(domain_i) << ")"
-                  //           << std::endl;
+                  std::cout << "DEBUG " << an_element.proto_volume.name << " set constituentDomain "
+                            << " " << domain_i << "(" << acts_domain_type.at(domain_i) << ")"
+                            << std::endl;
 
                   an_element.proto_volume.constituentBinning = {
                      Acts::BinningData(Acts::open,
@@ -293,11 +343,13 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohma
 
                }
             }
-            an_element.processed = childs_processed;
          }
+         an_element.processed = childs_processed;
 
          an_element.proto_volume.constituentVolumes.reserve( an_element.childs.size() );
          for(unsigned int child_i=0; child_i<an_element.childs.size(); ++child_i) {
+            hierarchy.at(an_element.childs.at(child_i)).moved=true;
+            std::cout << "DEBUG move #" << an_element.childs.at(child_i) << " to #" << element_idx << std::endl;
             an_element.proto_volume.constituentVolumes.push_back( std::move(hierarchy.at(an_element.childs.at(child_i) ).proto_volume) );
             //            std::cout << " " << hierarchy.at(an_element.childs.at(child_i) ).proto_volume.name;
          }
@@ -307,6 +359,21 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohma
                element_queue.push_back(an_element.parent);
             }
          }
+         std::cout << "DEBUG queue :";
+         for (auto elm : element_queue) {
+            const VolumeInfo &tmp = hierarchy.at(elm);
+            if (tmp.moved) {
+               std::cout << "(";
+            }
+            std::cout << " #" << elm;
+            if (tmp.processed) {
+               std::cout << "*";
+            }
+            if (tmp.moved) {
+               std::cout << ")";
+            }
+         }
+         std::cout << std::endl;
       }
       else {
          element_queue.push_back(element_idx);
@@ -323,6 +390,21 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(const nlohma
    }
    if (world) {
       detector.worldVolume = std::move(world->proto_volume);
+   }
+   std::deque<const Acts::ProtoVolume *> childs {&detector.worldVolume};
+   while (!childs.empty()) {
+      const Acts::ProtoVolume *a_child = childs.front();
+      childs.pop_front();
+      if (a_child) {
+         std::cout << "/---" << a_child->name << std::endl;
+         std::cout << a_child->extent.toString("    ") << std::endl;
+         for (const ProtoVolume &elm : a_child->constituentVolumes) {
+            std::cout << "| " << elm.name  << std::endl;
+            std::cout << "| " << elm.extent.toString("|   ") << std::endl;
+            childs.push_back( &elm );
+         }
+         std::cout << "\\---" << a_child->name << std::endl << std::endl;
+      }
    }
    return detector;
 }
@@ -373,6 +455,7 @@ std::shared_ptr<const Acts::TrackingGeometry>
 TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& tracking_geometry_description) {
    Acts::ProtoDetector detector(  createProtoDetector(tracking_geometry_description) );
    std::cout << detector.toString("") << std::endl;
+   detector.harmonize(true);
    std::vector<std::shared_ptr<Acts::Surface>> surfaces( createSurfaces( tracking_geometry_description) );
 
    // @TODO copied from Examples/Detectors/Geant4Detector/src/Geant4DetectorService.cpp.
