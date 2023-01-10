@@ -227,6 +227,11 @@ Acts::SurfaceArrayCreator::surfaceArrayOnDisc(
     for (const auto& srf : surfacesRaw) {
       Vector3 bpos = srf->binningPosition(gctx, binR);
       size_t bin = pAxisR.getBin(perp(bpos));
+      if (bin>=pAxisR.nBins) {
+         if (std::abs(perp(bpos) - pAxisR.max)< 4 * std::numeric_limits<double>::epsilon()*pAxisR.max) {
+            --bin;
+         }
+      }
       phiModules.at(bin).push_back(srf);
     }
 
