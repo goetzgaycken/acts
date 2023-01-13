@@ -165,7 +165,7 @@ void Acts::ProtoVolume::harmonize(bool legacy) {
 
     // Harmonize downwards
     for (auto& cv : cts.constituentVolumes) {
-      cv.extent.extend(extent, otherConstrains);
+      // cv.extent.extend(extent, otherConstrains);
       cv.harmonize(legacy);
     }
   }
