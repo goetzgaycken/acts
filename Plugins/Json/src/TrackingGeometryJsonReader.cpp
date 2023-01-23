@@ -28,7 +28,100 @@
 #include <limits>
 #include <stdexcept>
 
+// Stat
+#include <cmath>
+#include <algorithm>
+#include <vector>
+#include <ostream>
+
+// dump geom
+#include <deque>
+
 namespace {
+
+   inline double sqr(double a) { return a*a; }
+   class Stat {
+   public:
+      Stat() = default;
+      Stat(Stat &&) = default;
+      Stat(const Stat &) = default;
+      Stat(unsigned int nbins, double lower_edge, double upper_edge) {
+         setBinning(nbins, lower_edge, upper_edge);
+      }
+      void add(double val) {
+         m_n += 1.;
+         m_sum += val;
+         m_sum2 += val*val;
+         m_min=std::min(val,m_min);
+         m_max=std::max(val,m_max);
+         if (!m_bins.empty()) {fill(val); }
+      }
+      double mean() const { return m_n>0. ? m_sum/m_n : 0.; }
+      double rms()  const { return m_n>1. ? sqrt( (m_sum2 - m_sum*m_sum/m_n)/(m_n-1.)) : 0.; }
+      double n()    const { return m_n; }
+      double min()  const { return m_min; }
+      double max()  const { return m_max; }
+
+      Stat &operator =(const Stat &a) = default;
+      Stat &operator =(Stat &&a) = default;
+      Stat &operator +=(const Stat &a) {
+         m_n += a.m_n;
+         m_sum += a.m_sum;
+         m_sum2 += a.m_sum2;
+         m_min=std::min(a.m_min,m_min);
+         m_max=std::max(a.m_max,m_max);
+         if (m_bins.size() == a.m_bins.size()) {
+            for (unsigned int bin_i=0; bin_i < m_bins.size(); ++bin_i) {
+               m_bins[bin_i] += a.m_bins[bin_i];
+            }
+         }
+         return *this;
+      }
+      double m_n   = 0.;
+      double m_sum = 0.;
+      double m_sum2 = 0.;
+      double m_min = std::numeric_limits<double>::max();
+      double m_max = -std::numeric_limits<double>::max();
+
+      void setBinning(unsigned int n_bins, double lower_edge, double upper_edge) {
+         m_bins.clear();
+         m_bins.resize(n_bins+2,0);
+         m_scale = n_bins / (upper_edge - lower_edge);
+         m_lowerEdge=lower_edge-binWidth();
+      }
+      unsigned int bin( double value) {
+         return value < m_lowerEdge ? 0 : std::min(m_bins.size()-1,
+                                                   static_cast<std::size_t>( (value - m_lowerEdge) * m_scale));
+      }
+      double lowerEdge() const { return m_lowerEdge + binWidth(); }
+      double upperEdge() const { return m_lowerEdge + (m_bins.size()-1)/m_scale; }
+      double binWidth()  const { return 1/m_scale; }
+      const std::vector<unsigned short> &bins() const { return m_bins; }
+      void fill(double value) {
+         ++m_bins.at(bin(value));
+      }
+      double m_lowerEdge;
+      double m_scale;
+      std::vector<unsigned short> m_bins;
+   };
+   std::ostream &operator<<(std::ostream &out, const Stat &a ) {
+      out <<           std::setw(14) << a.min() << " < "
+          <<           std::setw(14) << a.mean()
+          << " +- " << std::setw(14) << a.rms()
+          << " < "  << std::setw(14) << a.max()
+          << " / "  << std::setw(9)  << a.n();
+      if (!a.bins().empty()) {
+         out << std::endl;
+         out << a.lowerEdge() << ", " << a.lowerEdge()+a.binWidth() << ".." << a.upperEdge() << ": ";
+         out << std::setw(5) << a.bins()[0] << " |";
+         for (unsigned int bin_i=1; bin_i<a.bins().size()-1; ++bin_i) {
+            out << " " << std::setw(5) << a.bins()[bin_i];
+         }
+         out << " | " << std::setw(5) << a.bins().back() ;
+      }
+      return out;
+   }
+
    bool overlaps(const Acts::Extent &a,  const Acts::Extent &b, Acts::BinningValue bValue) {
       return a.min(bValue) < b.max(bValue) && a.max(bValue) > b.min(bValue);
    }
@@ -87,7 +180,86 @@ namespace {
          std::cout << "\\---" << a_child->name << std::endl << std::endl;
       }
    }
-}
+   }
+
+   void dumpTrackingVolume(const Acts::TrackingVolume *volume, const std::string &margin) {
+      if (volume) {
+
+         std::cout << margin << volume->volumeName() << std::endl;
+         if (volume->confinedLayers()) {
+         Stat n_surfaces;
+         Stat n_surfaces_with_det;
+         Stat n_sensitive_surfaces;
+         Stat n_boundary_surfaces;
+         Stat n_approach_surfaces;
+         for (const std::shared_ptr<const Acts::Layer> &a_layer : volume->confinedLayers()->arrayObjects()) {
+            if (a_layer->surfaceArray()) {
+               unsigned short n_surfaces_counter = 0;
+               unsigned short n_surfaces_with_det_counter = 0;
+               unsigned short n_sensitive_surfaces_counter = 0;
+               unsigned short n_boundary_surfaces_counter = 0;
+               unsigned short n_approach_surfaces_counter = 0;
+               for ( const Acts::Surface *surface : a_layer->surfaceArray()->surfaces() ) {
+                  ++n_surfaces_counter;
+                  if (surface->geometryId().boundary()!= 0u) {
+                     ++n_boundary_surfaces_counter;
+                  }
+                  if (surface->geometryId().approach()!= 0u) {
+                     ++n_approach_surfaces_counter;
+                  }
+                  if (surface->geometryId().sensitive()!= 0u) {
+                     ++n_sensitive_surfaces_counter;
+                  }
+               }
+               if (n_surfaces_counter>0) {
+                  n_surfaces.add(n_surfaces_counter);
+                  n_surfaces_with_det.add(n_surfaces_with_det_counter);
+                  n_sensitive_surfaces.add(n_sensitive_surfaces_counter);
+                  n_boundary_surfaces.add(n_boundary_surfaces_counter);
+                  n_approach_surfaces.add(n_approach_surfaces_counter);
+               }
+            }
+         }
+         std::vector<std::pair<std::string, Stat *> > data;
+         if (n_surfaces.mean() > 0. ) {
+            data.reserve(5);
+            data.push_back(std::make_pair("surfaces", &n_surfaces) );
+            data.push_back(std::make_pair("surfaces with associated detectors", &n_surfaces_with_det) );
+            data.push_back(std::make_pair("sensitve surfaces", &n_sensitive_surfaces) );
+            data.push_back(std::make_pair("approach surfaces", &n_approach_surfaces) );
+            data.push_back(std::make_pair("boundary surfaces", &n_boundary_surfaces) );
+            for (const std::pair<std::string, Stat *> &a_data : data ) {
+               if (a_data.second) {
+                  std::cout << margin << " " << *a_data.second <<  " | " << a_data.first << std::endl;
+               }
+            }
+         }
+         }
+      }
+   }
+   void dumpTrackingVolumeHierarchy(const Acts::TrackingVolume *volume) {
+      if (volume) {
+         std::vector<std::pair<const Acts::TrackingVolume *, std::string> > stack;
+         stack.push_back(std::make_pair(volume,std::string("")));
+         while (!stack.empty()) {
+            auto [a_volume,margin] = stack.back();
+            stack.pop_back();
+            if (a_volume) {
+               dumpTrackingVolume(a_volume, margin);
+               if (a_volume->confinedVolumes()) {
+                  for (const std::shared_ptr<const Acts::TrackingVolume> &child_volume : a_volume->confinedVolumes()->arrayObjects()) {
+                     stack.push_back(std::make_pair(child_volume.get(), margin + "  "));
+                  }
+               }
+            }
+         }
+      }
+   }
+   void dumpTrackingGeometry(const Acts::TrackingGeometry *geom) {
+      if (geom) {
+         dumpTrackingVolumeHierarchy(geom->highestTrackingVolume());
+      }
+   }
 }
 
 
@@ -555,7 +727,7 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
    if (world) {
       detector.worldVolume = std::move(world->proto_volume);
    }
-   dumpProtoVolumes(detector);
+   //dumpProtoVolumes(detector);
 
    return detector;
 }
@@ -682,14 +854,15 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
 }
 
 std::shared_ptr<const Acts::TrackingGeometry>
-TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& tracking_geometry_description) const {
+TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& tracking_geometry_description,
+                                                   std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const {
    auto [surfaces, surfaces_per_volume] = createSurfaces( tracking_geometry_description);
 
    Acts::ProtoDetector detector(  createProtoDetector(tracking_geometry_description, surfaces, surfaces_per_volume) );
    std::cout << detector.toString("") << std::endl;
    detector.harmonize(true);
    std::cout << "DEBUG harmonize." << std::endl;
-   dumpProtoVolumes(detector);
+   //   dumpProtoVolumes(detector);
 
 
    // @TODO copied from Examples/Detectors/Geant4Detector/src/Geant4DetectorService.cpp.
@@ -733,14 +906,17 @@ TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& trackin
 
    kdtgConfig.surfaces = std::move(surfaces);
    kdtgConfig.protoDetector = std::move(detector);
+   kdtgConfig.materialDecorator = std::move(mdecorator);
 
    // Make the builder
    auto kdtTrackingGeometryBuilder = Acts::KDTreeTrackingGeometryBuilder(
       kdtgConfig, Acts::getDefaultLogger("KDTreeTrackingGeometryBuilder",
                                          m_cfg.toolLogLevel));
 
-   return std::shared_ptr<const Acts::TrackingGeometry>(
+   std::shared_ptr<const Acts::TrackingGeometry> tmp(
       kdtTrackingGeometryBuilder.trackingGeometry(tContext).release());
+   dumpTrackingGeometry( tmp.get() );
+   return tmp;
 
 }
 }
