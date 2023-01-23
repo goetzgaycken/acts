@@ -154,7 +154,11 @@ void ActsExamples::Options::addInputOptions(
       "input-json", value<bool>()->default_value(false),
       "Switch on to read '.json' file(s).")(
       "input-cbor", value<bool>()->default_value(false),
-      "Switch on to read '.cbor' file(s).");
+      "Switch on to read '.cbor' file(s).")(
+      "input-batch-size-max", value<std::size_t>()->default_value(std::numeric_limits<std::size_t>::max()),
+      "Maximum number of entries used in a single batch. If contain more entries than this, the entries are re-grouped into virtual events.")(
+      "input-max-entries", value<std::size_t>()->default_value(std::numeric_limits<std::size_t>::max()),
+      "Maximum number of entries read from the input file");
 }
 
 boost::program_options::variables_map ActsExamples::Options::parse(

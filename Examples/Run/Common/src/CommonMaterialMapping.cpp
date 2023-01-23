@@ -111,6 +111,8 @@ int runMaterialMapping(int argc, char* argv[],
     matTrackReaderRootConfig.fileList = intputFiles;
     matTrackReaderRootConfig.readCachedSurfaceInformation =
         readCachedSurfaceInformation;
+    matTrackReaderRootConfig.batchSizeMax = vm["input-batch-size-max"].template as<std::size_t>();
+    matTrackReaderRootConfig.entriesMax = vm["input-max-entries"].template as<std::size_t>();
     auto matTrackReaderRoot =
         std::make_shared<ActsExamples::RootMaterialTrackReader>(
             matTrackReaderRootConfig, logLevel);

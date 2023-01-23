@@ -67,8 +67,18 @@ ActsExamples::RootMaterialTrackReader::RootMaterialTrackReader(
   }
 
   m_events = static_cast<size_t>(m_inputChain->GetMaximum("event_id") + 1);
-  size_t nentries = m_inputChain->GetEntries();
-  m_batchSize = nentries / m_events;
+  std::size_t input_nentries = static_cast<size_t>(m_inputChain->GetEntries());
+  size_t nentries = std::min(input_nentries, m_cfg.entriesMax);
+  if (nentries/m_events > m_cfg.batchSizeMax ) {
+     m_batchSize = m_cfg.batchSizeMax;
+     m_events = nentries / m_cfg.batchSizeMax;
+     if (m_events * m_cfg.batchSizeMax < nentries) {
+        ++m_events;
+     }
+  }
+  else {
+     m_batchSize = input_nentries;
+  }
   ACTS_DEBUG("The full chain has "
              << nentries << " entries for " << m_events
              << " events this corresponds to a batch size of: " << m_batchSize);
@@ -81,7 +91,7 @@ ActsExamples::RootMaterialTrackReader::RootMaterialTrackReader(
     m_entryNumbers.resize(nentries);
     m_inputChain->Draw("event_id", "", "goff");
     // Sort to get the entry numbers of the ordered events
-    TMath::Sort(m_inputChain->GetEntries(), m_inputChain->GetV1(),
+    TMath::Sort(static_cast<long long int>(nentries), m_inputChain->GetV1(),
                 m_entryNumbers.data(), false);
   }
 }
@@ -131,7 +141,17 @@ ActsExamples::ProcessCode ActsExamples::RootMaterialTrackReader::read(
     std::unordered_map<size_t, Acts::RecordedMaterialTrack> mtrackCollection;
 
     // Loop over the entries for this event
-    for (size_t ib = 0; ib < m_batchSize; ++ib) {
+    std::size_t input_nentries =m_inputChain->GetEntries();
+    std::size_t nentries = std::min(input_nentries, m_cfg.entriesMax);
+    std::size_t batch_size = std::min(m_batchSize * (context.eventNumber+1),  nentries);
+    batch_size =  ((m_batchSize * context.eventNumber) >= nentries) ? 0 : (batch_size - m_batchSize * context.eventNumber);
+    std::cout << "DEBUG event number " << context.eventNumber
+              << " entries : " << (m_batchSize * context.eventNumber) << " .. " << (m_batchSize * context.eventNumber + batch_size - 1)
+              << "(+"<< batch_size << ")"
+              << " / " << nentries
+              << std::endl;
+    unsigned int counter=0;
+    for (size_t ib = 0; ib < batch_size; ++ib) {
       // Read the correct entry: startEntry + ib
       auto entry = m_batchSize * context.eventNumber + ib;
       if (not m_cfg.orderedEvents and entry < m_entryNumbers.size()) {
@@ -184,7 +204,9 @@ ActsExamples::ProcessCode ActsExamples::RootMaterialTrackReader::read(
         rmTrack.second.materialInteractions.push_back(std::move(mInteraction));
       }
       mtrackCollection[ib] = (std::move(rmTrack));
+      ++counter;
     }
+    std::cout << "DEBUG event number " << context.eventNumber << " processed " << counter << " tracks." << std::endl;
     // Write to the collection to the EventStore
     context.eventStore.add(m_cfg.collection, std::move(mtrackCollection));
   }

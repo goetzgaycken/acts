@@ -40,8 +40,9 @@ void addInput(Context& ctx) {
 
   ACTS_PYTHON_DECLARE_READER(ActsExamples::RootMaterialTrackReader, mex,
                              "RootMaterialTrackReader", collection, treeName,
-                             fileList, orderedEvents,
-                             readCachedSurfaceInformation);
+                             fileList,
+                             batchSizeMax,entriesMax,
+                             orderedEvents, readCachedSurfaceInformation);
 
   ACTS_PYTHON_DECLARE_READER(ActsExamples::RootTrajectorySummaryReader, mex,
                              "RootTrajectorySummaryReader", outputTracks,
