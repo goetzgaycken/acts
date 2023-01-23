@@ -21,7 +21,8 @@
 
 
 namespace Acts {
-
+   class IMaterialDecorator;
+   
 class TrackingGeometryJsonReader
 {
 public:
@@ -36,8 +37,10 @@ public:
    };
    TrackingGeometryJsonReader(const Config& cfg)  : m_cfg(cfg) {}
 
-   std::shared_ptr<const Acts::TrackingGeometry> read(const std::string &file_name) const;
-   std::shared_ptr<const Acts::TrackingGeometry> createTrackingGeometry(const nlohmann::json& tracking_geometry_description) const;
+   std::shared_ptr<const Acts::TrackingGeometry> read(const std::string &file_name,
+                                                      std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const;
+   std::shared_ptr<const Acts::TrackingGeometry> createTrackingGeometry(const nlohmann::json& tracking_geometry_description,
+                                                                        std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const;
 
 protected:
    Config m_cfg;

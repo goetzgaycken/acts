@@ -326,11 +326,11 @@ TrackingGeometryJsonReader::registerVolume(unsigned int volume_id,
 }
 
 std::shared_ptr<const Acts::TrackingGeometry>
- TrackingGeometryJsonReader::read(const std::string &file_name) const {
+ TrackingGeometryJsonReader::read(const std::string &file_name, std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const {
 
  std::ifstream f(file_name);
  nlohmann::json tracking_geometry_description = nlohmann::json::parse(f);
- return createTrackingGeometry(tracking_geometry_description);
+ return createTrackingGeometry(tracking_geometry_description, std::move(mdecorator));
 }
 
 Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(

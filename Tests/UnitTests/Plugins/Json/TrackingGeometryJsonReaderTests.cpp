@@ -286,7 +286,7 @@ BOOST_AUTO_TEST_CASE(ReadJson) {
 
  Acts::TrackingGeometryJsonReader reader(reader_cfg);
  std::shared_ptr<const Acts::TrackingGeometry>
-    tracking_geometry=reader.createTrackingGeometry(tracking_geometry_description);
+    tracking_geometry=reader.createTrackingGeometry(tracking_geometry_description, std::shared_ptr<const Acts::IMaterialDecorator>());
  std::map<const Acts::Surface *,Counter> duplicates;
  std::map<const Acts::TrackingVolume *,Counter> duplicate_volumes;
  dumpVolumes(tracking_geometry->highestTrackingVolume(), "", duplicates, duplicate_volumes);
