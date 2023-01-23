@@ -36,6 +36,8 @@ class RootMaterialTrackReader : public IReader {
     std::string treeName = "material-tracks";  ///< name of the output tree
     std::vector<std::string> fileList;         ///< List of input files
 
+    std::size_t batchSizeMax = 10000000u;
+    std::size_t entriesMax = std::numeric_limits<std::size_t>::max();
     /// Whether the events are ordered or not
     bool orderedEvents = true;
     // Read surface information for the root file
