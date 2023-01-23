@@ -38,6 +38,9 @@ class KDTreeTrackingGeometryBuilder : public ITrackingGeometryBuilder {
     std::shared_ptr<const ITrackingVolumeHelper> trackingVolumeHelper = nullptr;
     /// The layer crator - for sensitives
     std::shared_ptr<const LayerCreator> layerCreator = nullptr;
+    /// The optional material decorator for this
+    std::shared_ptr<const IMaterialDecorator> materialDecorator = nullptr;
+
     /// The created surfaces
     std::vector<std::shared_ptr<Surface>> surfaces = {};
     /// The proto tracking geometry description
@@ -60,6 +63,9 @@ class KDTreeTrackingGeometryBuilder : public ITrackingGeometryBuilder {
       const Config& cfg,
       std::unique_ptr<const Logger> logger =
           getDefaultLogger("KDTreeTrackingGeometryBuilder", Logging::INFO));
+
+  /// Destructor
+  ~KDTreeTrackingGeometryBuilder() override = default;
 
   /// TrackingGeometry Interface method
   ///
