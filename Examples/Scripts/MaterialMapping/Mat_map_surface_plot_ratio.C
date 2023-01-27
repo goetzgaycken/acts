@@ -7,18 +7,19 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "Mat_map_surface_plot.C"
+#include <iostream>
 
 /// Draw and save the ratio plots.
 
 void plot_ratio(std::vector<TH2F*> Map_prop, std::vector<TH2F*> Map_geant, const sinfo& surface_info, const std::string& name){
 
   std::string out_name = name+"/"+surface_info.name+"/"+surface_info.name+"_"+surface_info.idname;
-  gSystem->Exec( Form("mkdir %s", (name+"/"+surface_info.name).c_str()) );
+  gSystem->Exec( Form("mkdir -p %s", (name+"/"+surface_info.name).c_str()) );
 
   // Disk
-  if(surface_info.type == 2){
-
-    TText *vol = new TText(.1,.95,surface_info.name.c_str());
+   std::cout << "surface type : " << surface_info.type  << std::endl;
+   if(surface_info.type == 2){
+   TText *vol = new TText(.1,.95,surface_info.name.c_str());
     vol->SetNDC();
     TText *surface = new TText(.1,.9,surface_info.id.c_str());
     surface->SetNDC();
@@ -30,10 +31,24 @@ void plot_ratio(std::vector<TH2F*> Map_prop, std::vector<TH2F*> Map_geant, const
     c1->SetTopMargin(0.14);
     c1->SetLeftMargin(0.14);
     c1->SetBottomMargin(0.14);
-    Map_prop[0]->Divide(Map_geant[0]);
+    if (!Map_prop.empty() && !Map_geant.empty() && Map_prop[0] && Map_geant[0] ) {
+       //    std::cout << "Dvide : prop " << static_cast<const void *>( Map_prop[0] )  << std::endl;
+       //    std::cout << "Dvide : geant4 " << static_cast<const void *>(Map_geant[0] ) << std::endl;
+	    Map_prop[0]->Divide(Map_geant[0]);
     Map_prop[0]->GetZaxis()->SetTitle("X0 ratio");
     Map_prop[0]->SetMaximum(2.);
     Map_prop[0]->Draw("COLZ");
+    }
+    else {
+       if ( (!Map_prop.empty()  && Map_prop[0]) && (Map_geant.empty() || !Map_geant[0]) ) {
+          std::cout << "ERROR no geantino for " << surface_info.name << " " <<  surface_info.id
+                    << std::endl;
+       }
+       else if ( (Map_prop.empty()  || !Map_prop[0]) && (!Map_geant.empty() && Map_geant[0]) ) {
+          std::cout << "ERROR no assigned material for " << surface_info.name << " " <<  surface_info.id
+                    << std::endl;
+       }
+    }
     vol->Draw();
     surface->Draw();
     surface_z->Draw();
