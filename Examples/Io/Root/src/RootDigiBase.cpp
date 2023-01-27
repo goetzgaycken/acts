@@ -1114,7 +1114,9 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
         cov(0,1) = cluster_container.localXYCorrelation->at(meas_i);
         cov(1,0) = cluster_container.localXYCorrelation->at(meas_i);
 
-        measurements.emplace_back( Acts::Measurement<Acts::BoundIndices, 2>(sourceLink, indices, par, cov) );
+        
+        measurements.emplace_back( Acts::Measurement<Acts::BoundIndices, 2>(Acts::SourceLink{geoId, sourceLink},
+                                                                            indices, par, cov) );
 
         unsigned int n_contributions=0;
         unsigned int n_contributions_validBarcode=0;
