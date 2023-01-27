@@ -517,19 +517,20 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
 
   static unsigned int debug_counter=0;
   // Loop over all trajectories
-  for (auto [itraj, trackTip] : trackTips) {
-    const auto& traj = trajectories[itraj];
+  for (std::size_t iTraj = 0; iTraj < trajectories.size(); ++iTraj) {
+    const auto& traj = trajectories[iTraj];
     const auto& mj = traj.multiTrajectory();
+    for (auto trackTip : traj.tips()) {
     auto trajState =
        Acts::MultiTrajectoryHelpers::trajectoryState(mj, trackTip);
-    unsigned int seed_i=(itraj<=seedIdx.size() ? seedIdx[itraj] : std::numeric_limits<unsigned int>::max() );
-    if (itraj>=seedIdx.size()) {
-       std::cout << "WARNING " << __FUNCTION__ << " index mismatch " << itraj << " !< " << seedIdx.size() << std::endl;
+    unsigned int seed_i=(iTraj<=seedIdx.size() ? seedIdx[iTraj] : std::numeric_limits<unsigned int>::max() );
+    if (iTraj>=seedIdx.size()) {
+       std::cout << "WARNING " << __FUNCTION__ << " index mismatch " << iTraj << " !< " << seedIdx.size() << std::endl;
     }
 
     if (traj.hasTrajectory(trackTip)) {
        std::pair<std::map<std::pair<size_t, size_t>, unsigned int >::iterator, bool>
-          ret = trajectoryId.insert( std::make_pair( std::make_pair(itraj,trackTip), trajectoryId.size() ));
+          ret = trajectoryId.insert( std::make_pair( std::make_pair(iTraj,trackTip), trajectoryId.size() ));
        if (ret.second) {
           trajectoryIdMap.insert( std::make_pair( ret.first->second, ret.first->first) );
        }
@@ -546,7 +547,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           }
 
           // register all particles that generated this hit
-          const auto& sl = static_cast<const IndexSourceLink&>(state.uncalibrated());
+          const auto& sl = state.uncalibratedSourceLink().template get<IndexSourceLink>();
           auto hitIndex = sl.index();
           max_hit_index=std::max(max_hit_index,hitIndex);
           hitToTrackState[hitIndex].insert( std::make_pair(traj_id, state) );
@@ -586,7 +587,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                    if (m_cfg.dumpDuplicates) {
                    std::cout << "DEBUG " 
                              << (cov(Acts::eBoundLoc1,Acts::eBoundLoc1)<1e-6 ? "suspicious loc1 cov in " : "" )
-                             << " trajectory " << itraj << ", " << trackTip
+                             << " trajectory " << iTraj << ", " << trackTip
                              << " state " << --state_i << " measurement : (r,phi,z) = ( " << Acts::VectorHelpers::perp(pos)
                              << ", " << Acts::VectorHelpers::phi(pos)
                              << ", " << pos[2] << " )"
@@ -651,7 +652,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           Acts::ObjVisualization3D visualizer;
           Acts::EventDataView3D::drawMultiTrajectory(visualizer,  traj.multiTrajectory(), trackTip, ctx.geoContext);
           std::stringstream file_name;
-          file_name << "/tmp/traj_" << plot_i << "_" << itraj<< "_" << trackTip << ".obj";
+          file_name << "/tmp/traj_" << plot_i << "_" << iTraj<< "_" << trackTip << ".obj";
           std::ofstream out(file_name.str().c_str());
           visualizer.write(out);
           visualizer.clear();
@@ -681,7 +682,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
        }
     }
   }
-
+  }
   for (const std::pair<const ActsFatras::Barcode, std::map<unsigned int, Counter> > &particle_to_trajectories : trajectoriesPerParticle) {
      auto particle_iter = particles.find(particle_to_trajectories.first);
      double particle_pt= particle_iter != particles.end()
@@ -719,9 +720,10 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   processed.reserve(trajectoryIdMap.size());
   hit_r.resize( max_hit_index+1, 0.);
 
-  for (auto [itraj, trackTip] : trackTips) {
-    const auto& traj = trajectories[itraj];
+  for (std::size_t iTraj = 0; iTraj < trajectories.size(); ++iTraj) {
+    const auto& traj = trajectories[iTraj];
     const auto& mj = traj.multiTrajectory();
+    for (auto trackTip : traj.tips()) {
     auto trajState =
        Acts::MultiTrajectoryHelpers::trajectoryState(mj, trackTip);
 
@@ -731,7 +733,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
        std::map<unsigned int,Counter> trajectory_counts;
 
        std::map<std::pair<size_t, size_t>, unsigned int >::iterator
-          id_iter = trajectoryId.find( std::make_pair(itraj,trackTip) );
+          id_iter = trajectoryId.find( std::make_pair(iTraj,trackTip) );
        unsigned int traj_id=(id_iter != trajectoryId.end() ? id_iter->second : std::numeric_limits<unsigned int>::max());
        {
           std::vector<unsigned int>::const_iterator processed_iter = std::lower_bound(processed.begin(), processed.end(), traj_id);
@@ -810,7 +812,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
 
        if (particle_counts.size()>1 || trajectory_counts.size()>1) {
           if (m_cfg.dumpDuplicates) {
-          std::cout << "trajectory " << std::setw(9) << itraj << " tip: " << std::setw(9) << trackTip
+          std::cout << "trajectory " << std::setw(9) << iTraj << " tip: " << std::setw(9) << trackTip
                     << " id " << traj_id
                     << std::endl;
           std::cout << "----------------------------- " << std::endl;
@@ -1290,8 +1292,8 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
           
        }
     }
+    }
   }
-
   if (m_stat.empty()) {
      std::lock_guard<std::mutex> stat_lock(m_mutex);
      m_stat.resize(stat_pt_bins.size());
