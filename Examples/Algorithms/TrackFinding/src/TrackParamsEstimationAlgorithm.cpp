@@ -233,10 +233,8 @@ ActsExamples::ProcessCode ActsExamples::TrackParamsEstimationAlgorithm::execute(
         }
         const auto slink = sp->sourceLinks()[0].get<IndexSourceLink>();
         track.push_back(slink.index());
-        for (const auto a_link_ptr : sp->sourceLinks() ) {
-           if (a_link_ptr) {
-              ext_track.push_back(static_cast<const IndexSourceLink *>(a_link_ptr)->index() );
-           }
+        for (const auto &a_link_ptr : sp->sourceLinks() ) {
+           ext_track.push_back(a_link_ptr.get<IndexSourceLink>().index() );
         }
       }
       tracks.emplace_back(track);
