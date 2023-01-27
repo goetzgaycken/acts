@@ -496,7 +496,7 @@ namespace {
    }
 
    void dumpQuality(const std::string &header,
-                    const ActsExamples::AlgorithmContext& ctx,
+                    [[maybe_unused]] const ActsExamples::AlgorithmContext& ctx,
                     const std::map<unsigned int,Counter> &trajectory_counts,
                     const std::map<unsigned int, std::pair<size_t, size_t> > &trajectoryIdMap,
                     const ActsExamples::TrajectoriesContainer& trajectories,
