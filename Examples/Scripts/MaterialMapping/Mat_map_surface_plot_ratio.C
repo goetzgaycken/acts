@@ -116,8 +116,11 @@ void Mat_map_surface_plot_ratio(std::string input_file_prop = "", std::string in
   std::map<uint64_t,std::vector<TH2F*>> surface_hist_geant;
   std::map<uint64_t,sinfo> surface_info_geant;
 
-  Fill(surface_hist_prop, surface_info_prop, input_file_prop, nbprocess);
-  Fill(surface_hist_geant, surface_info_geant, input_file_geant, nbprocess);
+  SurfaceIDMap id_map;
+  Fill(surface_hist_prop, surface_info_prop, input_file_prop, nbprocess, &id_map);
+  Map3D id_remap( id_map.getCenterToGeoIDMap() );
+
+  Fill(surface_hist_geant, surface_info_geant, input_file_geant, nbprocess, nullptr, &id_remap);
 
   for (auto hist_it = surface_hist_prop.begin(); hist_it != surface_hist_prop.end(); hist_it++){
     if(name_prop != "") plot(hist_it->second, surface_info_prop[hist_it->first], name_prop);

@@ -7,6 +7,13 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include <TROOT.h>
+#include "TH2F.h"
+#include "TText.h"
+#include "TCanvas.h"
+#include "TFile.h"
+#include "TTree.h"
+#include "TStyle.h"
+#include "TSystem.h"
 
 #include "materialPlotHelper.cpp"
 
@@ -14,7 +21,201 @@
 #include <iostream>
 #include <sstream>
 
+#include <map>
+#include <array>
+#include <limits>
+#include <cmath>
 /// Draw and save the histograms.
+class MyStat {
+public:
+   void add(double value) {
+      ++m_n;
+      m_sum += value;
+      m_sum2 += value*value;
+      m_min=std::min(m_min,value);
+      m_max=std::max(m_max,value);
+   }
+   unsigned int n() const { return m_n; } 
+   double max() const { return m_max; }
+   double min() const { return m_min; }
+   double mean() const { return (m_n>0 ? m_sum/m_n : 0 ); }
+   double rms() const { return (m_n>1 ? sqrt((m_sum2 - m_sum*m_sum/m_n)/(m_n-1))+1 : 0 ); }
+   
+   unsigned int m_n=0;
+   double m_sum =0.;
+   double m_sum2 = 0;
+   double m_min = std::numeric_limits<double>::max();
+   double m_max = -std::numeric_limits<double>::max();
+};
+class RangeKey {
+public:
+   RangeKey(float a_min, float a_max) : m_min(a_min), m_max(a_max) {}
+   bool operator<(const RangeKey &a) const {
+      return m_min < a.m_min;
+   }
+   float min() const { return m_min; }
+   float max() const { return m_max; }
+   bool contained( float val ) const {
+      return m_min <= val && val <= m_max;
+   }
+   float m_min;
+   float m_max;
+};
+
+using Map3D = std::multimap<RangeKey, std::multimap<RangeKey, std::multimap< RangeKey , std::pair< std::array<float,3>, uint64_t> > > >;
+
+class SurfaceIDMap {
+public:
+   std::unordered_map<uint64_t, std::array<MyStat, 3>  > m_geoIdToCenter;
+   void addSurface(uint64_t id, float x, float y, float z) {
+      std::pair<std::unordered_map<uint64_t, std::array<MyStat, 3>  >::iterator, bool>
+         ret = m_geoIdToCenter.insert( std::make_pair( id, std::array<MyStat, 3>{} ) );
+      ret.first->second.at(0).add(x);
+      ret.first->second.at(1).add(y);
+      ret.first->second.at(2).add(z);
+   }
+   Map3D getCenterToGeoIDMap() {
+      Map3D  center_to_geo_id; 
+      for(const auto &elm : m_geoIdToCenter ) {
+         float lower_x = static_cast<float>(elm.second.at(0).min()-2*elm.second.at(0).rms());
+         float lower_y = static_cast<float>(elm.second.at(1).min()-2*elm.second.at(1).rms());
+         float lower_z = static_cast<float>(elm.second.at(2).min()-2*elm.second.at(2).rms());
+         float mean_x = static_cast<float>(elm.second.at(0).mean());
+         float mean_y = static_cast<float>(elm.second.at(1).mean());
+         float mean_z = static_cast<float>(elm.second.at(2).mean());
+         bool next=false;
+         std::multimap<RangeKey, std::multimap<RangeKey, std::multimap< RangeKey , std::pair< std::array<float,3>, uint64_t> > > >::iterator
+            x_iter = center_to_geo_id.lower_bound(RangeKey(lower_x,lower_x));
+         for ( ;x_iter != center_to_geo_id.end() && x_iter->first.min() <= elm.second.at(0).min(); ++x_iter) {
+            if (x_iter->first.contained(mean_x)) {
+               std::multimap<RangeKey, std::multimap< RangeKey , std::pair< std::array<float,3>, uint64_t> > >::iterator
+                  y_iter = x_iter->second.lower_bound(RangeKey(lower_y,lower_y));
+               for (;y_iter != x_iter->second.end() && y_iter->first.min() <= elm.second.at(1).min(); ++y_iter) {
+                  if (y_iter->first.contained(mean_y)) {
+                     y_iter->second.insert( std::make_pair(RangeKey(lower_z, static_cast<float>(elm.second.at(2).max()+2*elm.second.at(2).rms())),
+                                                           std::make_pair( std::array<float,3>{mean_x, mean_y, mean_z}, elm.first )
+                                                           ) );
+                     std::cout << "Insert: "
+                               << x_iter->first.min() << " .. "
+                               << x_iter->first.max() << " , "
+                               << y_iter->first.min() << " .. "
+                               << y_iter->first.max() << " : "
+                               << lower_x << ", " << lower_y << ", " << lower_z << " [ " << mean_x << " +- " << elm.second.at(0).rms()
+                               << ", " << mean_y << " +- " << elm.second.at(1).rms()
+                               << ", " << mean_z << " +- " << elm.second.at(2).rms()
+                               << " ]"
+                               << elm.first << std::endl;
+                     std::cout << "       "
+                               << elm.second.at(0).min() << " .. " << elm.second.at(0).max()
+                               << elm.second.at(1).min() << " .. " << elm.second.at(1).max()
+                               << elm.second.at(2).min() << " .. " << elm.second.at(2).max()
+                               << std::endl;
+                     
+                     next=true;
+                     break;
+               // std::multimap< RangeKey , std::pair< std::array<float,3>, uint64_t> >::iterator
+               //    z_iter = center_to_geo_id.lower_bound(lower_y);
+               // for (;z_iter != center_to_geo_id.end() && z_iter->first.min() <= elm.second.at(2).min(); ++y_iter) {
+               //    if (z_iter->first.contained( mean_z)) {
+               //       z_iter->second
+               //    }
+               // }
+                  }
+               }
+               if (next) break;
+               x_iter->second.insert(std::make_pair(RangeKey(lower_y, static_cast<float>(elm.second.at(1).max()+2*elm.second.at(1).rms())),
+                                                    std::multimap< RangeKey , std::pair< std::array<float,3>, uint64_t> >()))
+                  ->second.insert(std::make_pair(RangeKey(lower_z, static_cast<float>(elm.second.at(2).max()+2*elm.second.at(2).rms())),
+                                                       std::make_pair( std::array<float,3>{mean_x, mean_y, mean_z}, elm.first )
+                                                       ) );
+               std::cout << "Insert: "
+                         << x_iter->first.min() << " .. "
+                         << x_iter->first.max() << " : "
+                         << lower_x << ", " << lower_y << ", " << lower_z << " [ " << mean_x << " +- " << elm.second.at(0).rms()
+                         << ", " << mean_y << " +- " << elm.second.at(1).rms()
+                         << ", " << mean_z << " +- " << elm.second.at(2).rms()
+                         << " ]"
+                         << elm.first << std::endl;
+               std::cout << "       "
+                         << elm.second.at(0).min() << " .. " << elm.second.at(0).max()
+                         << elm.second.at(1).min() << " .. " << elm.second.at(1).max()
+                         << elm.second.at(2).min() << " .. " << elm.second.at(2).max()
+                         << std::endl;
+               next=true;
+            
+            }
+         }
+         if (next) continue;
+         center_to_geo_id.insert(std::make_pair(RangeKey(lower_x, static_cast<float>(elm.second.at(0).max()+2*elm.second.at(0).rms())),
+                                                std::multimap<RangeKey, std::multimap< RangeKey , std::pair< std::array<float,3>, uint64_t> > >()))
+            ->second.insert(std::make_pair(RangeKey(lower_y, static_cast<float>(elm.second.at(1).max()+2*elm.second.at(1).rms())),
+                                                 std::multimap< RangeKey , std::pair< std::array<float,3>, uint64_t> >()))
+            ->second.insert(std::make_pair(RangeKey(lower_z, static_cast<float>(elm.second.at(2).max()+2*elm.second.at(2).rms())),
+                                          std::make_pair( std::array<float,3>{mean_x, mean_y, mean_z}, elm.first )
+                                          ) );
+         std::cout << "Insert: "
+                   << lower_x << ", " << lower_y << ", " << lower_z << " [ " << mean_x << " +- " << elm.second.at(0).rms()
+                   << ", " << mean_y << " +- " << elm.second.at(1).rms()
+                   << ", " << mean_z << " +- " << elm.second.at(2).rms()
+                   << " ]"
+                   << elm.first << std::endl;
+         std::cout << "       "
+                   << elm.second.at(0).min() << " .. " << elm.second.at(0).max()
+                   << elm.second.at(1).min() << " .. " << elm.second.at(1).max()
+                   << elm.second.at(2).min() << " .. " << elm.second.at(2).max()
+                   << std::endl;
+      }
+      return center_to_geo_id;
+   }
+};
+
+inline double sqr( double a) { return a*a; }
+inline double distance2( float x, float y, float z, const std::array<float, 3> &point) {
+   return sqr( x - point.at(0) ) + sqr( y - point.at(1) ) + sqr( z - point.at(2) );
+}
+uint64_t findGeoID(float x_val, float y_val, float z_val,
+                   Map3D &center_to_geo_id) {
+   double min_dist = std::numeric_limits<double>::max();
+   uint64_t best_id = 0u;
+   unsigned int n_x=0u;
+   unsigned int n_y=0u;
+   unsigned int n_z=0u;
+   unsigned int n_tests=0u;
+   std::multimap<RangeKey, std::multimap<RangeKey, std::multimap< RangeKey , std::pair< std::array<float,3>, uint64_t> > > >::iterator
+      x_iter = center_to_geo_id.lower_bound(RangeKey(x_val,x_val));
+   for ( ;x_iter != center_to_geo_id.end() && x_iter->first.min() <= x_val; ++x_iter) {
+      ++n_x;
+      if (x_iter->first.contained(x_val)) {
+         std::multimap<RangeKey, std::multimap< RangeKey , std::pair< std::array<float,3>, uint64_t> > >::iterator
+            y_iter = x_iter->second.lower_bound(RangeKey(y_val,y_val));
+         for (;y_iter != x_iter->second.end() && y_iter->first.min() <= y_val; ++y_iter) {
+            ++n_y;
+            if (y_iter->first.contained(y_val)) {
+               std::multimap< RangeKey , std::pair< std::array<float,3>, uint64_t> >::iterator
+                  z_iter = y_iter->second.lower_bound(RangeKey(z_val,z_val));
+               for (;z_iter != y_iter->second.end() && y_iter->first.min() <= y_val; ++y_iter) {
+                  ++n_z;
+                  if (z_iter->first.contained(z_val)) {
+                     ++n_tests;
+                     double dist = distance2(x_val, y_val, z_val, z_iter->second.first);
+                     if (dist < min_dist) {
+                        min_dist=dist;
+                        best_id = z_iter->second.second;
+                     }
+                  }
+               }
+            }
+         }
+      }
+   }
+   if (best_id == 0u) {
+      std::cerr << "ERROR failed to find geo ID for " << x_val << ", " << y_val  << ", " << z_val << " tests: "
+                << n_x << ", " << n_y << ", " << n_z << " -> "
+                << n_tests << std::endl;
+   }
+   return best_id;
+}
+   
 
 void plot(std::vector<TH2F*> Map, const sinfo& surface_info, const std::string& name){
 
@@ -129,7 +330,7 @@ void Initialise_hist(std::vector<TH2F*>& surface_hist,
 /// Fill the histograms for each surfaces.
 
 void Fill(std::map<uint64_t,std::vector<TH2F*>>& surface_hist,  std::map<uint64_t,sinfo>& surface_info,
-  const std::string& input_file, const int& nbprocess){
+          const std::string& input_file, const int& nbprocess, SurfaceIDMap *id_map=nullptr, Map3D *id_remap=nullptr){
 
   std::map<std::string,std::string> surface_name;
 
@@ -183,8 +384,17 @@ void Fill(std::map<uint64_t,std::vector<TH2F*>>& surface_hist,  std::map<uint64_
 
       // Ignore surface of incorrect type
       if(sur_type->at(j) == -1) continue;
+
+      if (id_map) {
+         id_map->addSurface(sur_id->at(j),sur_x->at(j),sur_y->at(j),sur_z->at(j));
+      }
+      uint64_t the_sur_id= sur_id->at(j);
+      if (id_remap) {
+         the_sur_id =  findGeoID(sur_x->at(j),sur_y->at(j),sur_z->at(j), *id_remap);
+      }
+
       // If a surface was never encountered initialise the hist, info and weight
-      if(surface_hist.find(sur_id->at(j))==surface_hist.end()){
+      if(surface_hist.find(the_sur_id)==surface_hist.end()){
         float pos;
         if(sur_type->at(j) == 1){
           pos = sqrt(sur_x->at(j)*sur_x->at(j)+sur_y->at(j)*sur_y->at(j));
@@ -192,12 +402,12 @@ void Fill(std::map<uint64_t,std::vector<TH2F*>>& surface_hist,  std::map<uint64_
         if(sur_type->at(j) == 2 || sur_type->at(j) == 4){
           pos = sur_z->at(j);
         }
-        surface_weight[sur_id->at(j)] = 0;
-        Initialise_info(surface_info[sur_id->at(j)], surface_name, sur_id->at(j), sur_type->at(j), pos, sur_range_min->at(j), sur_range_max->at(j));
-        Initialise_hist(surface_hist[sur_id->at(j)], surface_info[sur_id->at(j)]);
+        surface_weight[the_sur_id] = 0;
+        Initialise_info(surface_info[the_sur_id], surface_name, the_sur_id, sur_type->at(j), pos, sur_range_min->at(j), sur_range_max->at(j));
+        Initialise_hist(surface_hist[the_sur_id], surface_info[the_sur_id]);
       }
       // Weight for each surface = number of hit associated to it.
-      surface_weight[sur_id->at(j)]++;
+      surface_weight[the_sur_id]++;
     }
 
     // loop over all the material hit to fill the histogram
@@ -205,16 +415,20 @@ void Fill(std::map<uint64_t,std::vector<TH2F*>>& surface_hist,  std::map<uint64_
 
       // Ignore surface of incorrect type
       if(sur_type->at(j) == -1) continue;
+      uint64_t the_sur_id= sur_id->at(j);
+      if (id_remap) {
+         the_sur_id =  findGeoID(sur_x->at(j),sur_y->at(j),sur_z->at(j), *id_remap);
+      }
 
       if(sur_type->at(j) == 1){
-        surface_hist[sur_id->at(j)][0]->Fill(v_eta, v_phi, (mat_step_length->at(j)/mat_X0->at(j)));
-        surface_hist[sur_id->at(j)][1]->Fill(v_eta, v_phi, (mat_step_length->at(j)/mat_L0->at(j)));
-        surface_hist[sur_id->at(j)][2]->Fill(v_eta, v_phi, (1/surface_weight[sur_id->at(j)]));
+        surface_hist[the_sur_id][0]->Fill(v_eta, v_phi, (mat_step_length->at(j)/mat_X0->at(j)));
+        surface_hist[the_sur_id][1]->Fill(v_eta, v_phi, (mat_step_length->at(j)/mat_L0->at(j)));
+        surface_hist[the_sur_id][2]->Fill(v_eta, v_phi, (1/surface_weight[the_sur_id]));
       }
       if(sur_type->at(j) == 2 || sur_type->at(j) == 4){
-        surface_hist[sur_id->at(j)][0]->Fill(sur_x->at(j), sur_y->at(j), (mat_step_length->at(j)/mat_X0->at(j)));
-        surface_hist[sur_id->at(j)][1]->Fill(sur_x->at(j), sur_y->at(j), (mat_step_length->at(j)/mat_L0->at(j)));
-        surface_hist[sur_id->at(j)][2]->Fill(sur_x->at(j), sur_y->at(j), (1/surface_weight[sur_id->at(j)]));
+        surface_hist[the_sur_id][0]->Fill(sur_x->at(j), sur_y->at(j), (mat_step_length->at(j)/mat_X0->at(j)));
+        surface_hist[the_sur_id][1]->Fill(sur_x->at(j), sur_y->at(j), (mat_step_length->at(j)/mat_L0->at(j)));
+        surface_hist[the_sur_id][2]->Fill(sur_x->at(j), sur_y->at(j), (1/surface_weight[the_sur_id]));
       }
     }
   }
