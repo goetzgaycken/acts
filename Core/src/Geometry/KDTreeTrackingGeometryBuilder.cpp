@@ -69,11 +69,13 @@ Acts::KDTreeTrackingGeometryBuilder::translateVolume(
   ACTS_DEBUG(indent << "Processing ProtoVolume: " << ptVolume.name);
   std::vector<std::shared_ptr<const TrackingVolume>> translatedVolumes = {};
 
-  if (not ptVolume.constituentVolumes.empty() and not ptVolume.layerContainer) {
+  if (ptVolume.container.has_value()
+      and not ptVolume.container.value().constituentVolumes.empty()
+      and not ptVolume.container.value().layerContainer) {
     ACTS_VERBOSE(indent << "> container volume with "
-                        << ptVolume.constituentVolumes.size()
+                        << ptVolume.container.value().constituentVolumes.size()
                         << " constituents.");
-    for (auto& cVolume : ptVolume.constituentVolumes) {
+    for (auto& cVolume : ptVolume.container.value().constituentVolumes) {
       auto dtVolume = translateVolume(cCache, gctx, kdt, cVolume,
                                       indent + m_cfg.hierarchyIndent);
       translatedVolumes.push_back(dtVolume);
@@ -87,11 +89,11 @@ Acts::KDTreeTrackingGeometryBuilder::translateVolume(
   }
 
   std::vector<std::shared_ptr<const Layer>> layers = {};
-  if (not ptVolume.constituentVolumes.empty()) {
+  if (ptVolume.container.has_value() and not ptVolume.container.value().constituentVolumes.empty()) {
     ACTS_VERBOSE(indent << "> layer volume with "
-                        << ptVolume.constituentVolumes.size()
+                        << ptVolume.container.value().constituentVolumes.size()
                         << " layer volumes.");
-    for (auto& plVolume : ptVolume.constituentVolumes) {
+    for (auto& plVolume : ptVolume.container.value().constituentVolumes) {
       layers.push_back(translateLayer(cCache, gctx, kdt, plVolume,
                                       indent + m_cfg.hierarchyIndent));
     }
@@ -132,7 +134,8 @@ Acts::KDTreeTrackingGeometryBuilder::translateLayer(
   if (layerSurfaces.size() == 1u) {
     auto surface = layerSurfaces[0u].second;
     const auto& transform = surface->transform(gctx);
-    if (plVolume.layerType == Acts::Surface::SurfaceType::Cylinder) {
+    if (plVolume.internal.has_value()
+        and  plVolume.internal.value().layerType == Acts::Surface::SurfaceType::Cylinder) {
       ACTS_VERBOSE(indent +
                    ">> creating cylinder layer from a single surface.");
       // Get the bounds
@@ -144,7 +147,8 @@ Acts::KDTreeTrackingGeometryBuilder::translateLayer(
           CylinderLayer::create(transform, cylinderBoundsClone, nullptr, 1.);
       cylinderLayer->assignSurfaceMaterial(surface->surfaceMaterialSharedPtr());
       tLayer = cylinderLayer;
-    } else if (plVolume.layerType == Acts::Surface::SurfaceType::Disc) {
+    } else if (plVolume.internal.has_value()
+               and plVolume.internal.value().layerType == Acts::Surface::SurfaceType::Disc) {
       ACTS_VERBOSE(indent +
                    ">> creating cylinder layer from a single surface.");
       // Get the bounds
@@ -171,15 +175,16 @@ Acts::KDTreeTrackingGeometryBuilder::translateLayer(
     std::size_t bins0 = 0;
     std::size_t bins1 = 0;
     // In case explicit binning is given
-    if (plVolume.layerSurfaceBinning.size() == 2u) {
-      bType0 = plVolume.layerSurfaceBinning[0u].type;
-      bType1 = plVolume.layerSurfaceBinning[1u].type;
+    if (plVolume.internal.has_value()
+        and plVolume.internal.value().surfaceBinning.size() == 2u) {
+      bType0 = plVolume.internal.value().surfaceBinning[0u].type;
+      bType1 = plVolume.internal.value().surfaceBinning[1u].type;
       // In case explicit bin numbers are given in addition
       if (bType0 == Acts::equidistant and bType1 == Acts::equidistant and
-          plVolume.layerSurfaceBinning[0u].bins() > 1u and
-          plVolume.layerSurfaceBinning[1u].bins() > 1u) {
-        bins0 = plVolume.layerSurfaceBinning[0u].bins();
-        bins1 = plVolume.layerSurfaceBinning[1u].bins();
+          plVolume.internal.value().surfaceBinning[0u].bins() > 1u and
+          plVolume.internal.value().surfaceBinning[1u].bins() > 1u) {
+        bins0 = plVolume.internal.value().surfaceBinning[0u].bins();
+        bins1 = plVolume.internal.value().surfaceBinning[1u].bins();
         ACTS_VERBOSE(indent + ">> binning provided externally to be "
                      << bins0 << " x " << bins1 << ".");
       }
@@ -187,7 +192,8 @@ Acts::KDTreeTrackingGeometryBuilder::translateLayer(
 
     Acts::ProtoLayer pLayer(gctx, cLayerSurfaces);
     pLayer.envelope = plVolume.extent.envelope();
-    if (plVolume.layerType == Acts::Surface::SurfaceType::Cylinder) {
+    if (plVolume.internal.has_value()
+        and plVolume.internal.value().layerType == Acts::Surface::SurfaceType::Cylinder) {
       ACTS_VERBOSE(indent + ">> creating cylinder layer with "
                    << cLayerSurfaces.size() << " surfaces.");
       // Forced equidistant or auto-binned
@@ -197,7 +203,8 @@ Acts::KDTreeTrackingGeometryBuilder::translateLayer(
                    : m_cfg.layerCreator->cylinderLayer(gctx, cLayerSurfaces,
                                                        bType0, bType1, pLayer);
 
-    } else if (plVolume.layerType == Acts::Surface::SurfaceType::Disc) {
+    } else if (plVolume.internal.has_value()
+               and plVolume.internal.value().layerType == Acts::Surface::SurfaceType::Disc) {
       ACTS_VERBOSE(indent + ">> creating disc layer with "
                    << cLayerSurfaces.size() << " surfaces.");
       // Forced equidistant or auto-binned

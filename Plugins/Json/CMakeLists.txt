@@ -20,7 +20,8 @@ target_include_directories(
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
     $<INSTALL_INTERFACE:include>)
 target_link_libraries(
-  ActsPluginJson PUBLIC ActsCore)
+  ActsPluginJson PUBLIC ActsCore
+  PRIVATE ROOT::Core ROOT::Hist ROOT::Tree)
 acts_target_link_libraries_system(
   ActsPluginJson PUBLIC nlohmann_json::nlohmann_json)
 

@@ -22,7 +22,7 @@
 
 namespace Acts {
    class IMaterialDecorator;
-   
+
 class TrackingGeometryJsonReader
 {
 public:
@@ -34,6 +34,9 @@ public:
       Acts::Logging::Level toolLogLevel = Acts::Logging::INFO;
       /// Logging level
       Acts::Logging::Level logLevel = Acts::Logging::INFO;
+
+      std::string geantinoInputFileName;
+      uint64_t maxGeantinoEntries;
    };
    TrackingGeometryJsonReader(const Config& cfg)  : m_cfg(cfg) {}
 

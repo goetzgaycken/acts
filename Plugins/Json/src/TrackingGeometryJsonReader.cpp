@@ -22,6 +22,8 @@
 #include "Acts/Geometry/SurfaceArrayCreator.hpp"
 #include "Acts/Geometry/TrackingVolumeArrayCreator.hpp"
 
+#include "GeantinoReader.hpp"
+
 #include <memory>
 #include <array>
 #include <deque>
@@ -132,11 +134,11 @@ namespace {
    while (!childs.empty()) {
       const Acts::ProtoVolume *a_child = childs.front();
       childs.pop_front();
-      if (a_child) {
+      if (a_child and a_child->container.has_value()) {
          unsigned int container=0;
          unsigned int layer_contaier=0;
-         for (const Acts::ProtoVolume &elm : a_child->constituentVolumes) {
-            if (elm.layerContainer) {
+         for (const Acts::ProtoVolume &elm : a_child->container.value().constituentVolumes) {
+            if (elm.container.has_value() and elm.container.value().layerContainer) {
                ++layer_contaier;
             }
             else {
@@ -145,11 +147,13 @@ namespace {
          }
          std::cout << "/---" << a_child->name
                    << ( /*a_child->layerContainer*/ true ?
-                        ((a_child->layerType == Acts::Surface::SurfaceType::Disc) ? " (disc layers)"
-                         : (a_child->layerType == Acts::Surface::SurfaceType::Cylinder) ? " (cylinder layers)"
+                        ((a_child->internal.has_value()
+                          and a_child->internal.value().layerType == Acts::Surface::SurfaceType::Disc) ? " (disc layers)"
+                         : (a_child->internal.has_value()
+                            and a_child->internal.value().layerType == Acts::Surface::SurfaceType::Cylinder) ? " (cylinder layers)"
                          : " (unknown layer type)")
                         : "")
-                   << ( a_child->layerContainer ? " (layerContainer)" : "");
+                   << ( a_child->container.has_value() and  a_child->container.value().layerContainer ? " (layerContainer)" : "");
          if (container>0) {
             std::cout << " tracking volumes: " << container;
          }
@@ -158,24 +162,30 @@ namespace {
          }
          std::cout << std::endl;
          std::cout << a_child->extent.toString("    ") << std::endl;
-         for (const Acts::ProtoVolume &elm : a_child->constituentVolumes) {
-            std::cout << "| " << elm.name
-                      << ( /*elm.layerContainer*/true ?
-                           ((elm.layerType == Acts::Surface::SurfaceType::Disc) ? " (disc layers)"
-                            : (elm.layerType == Acts::Surface::SurfaceType::Cylinder) ? " (cylinder layers)"
-                            : " (unknown layer type)")
-                           : "")
-                      << ( elm.layerContainer ? " (layerContainer)" : "");
-            if (!a_child->constituentBinning.empty()) {
-               std::cout << " (binning:";
-               for (const Acts::BinningData &binning : a_child->constituentBinning ) {
-                  std::cout << " " << Acts::binningValueNames().at(binning.binvalue);
+         if (a_child->container.has_value()) {
+            for (const Acts::ProtoVolume &elm : a_child->container.value().constituentVolumes) {
+               std::cout << "| " << elm.name
+                         << ( /*elm.layerContainer*/true ?
+                              ((elm.internal.has_value()
+                                and elm.internal.value().layerType == Acts::Surface::SurfaceType::Disc) ? " (disc layers)"
+                               : (elm.internal.has_value()
+                                  and elm.internal.value().layerType == Acts::Surface::SurfaceType::Cylinder) ? " (cylinder layers)"
+                               : " (unknown layer type)")
+                              : "")
+                         << ( (elm.container.has_value()
+                               and elm.container.value().layerContainer) ? " (layerContainer)" : "");
+               if (!a_child->container.value().constituentBinning.empty()) {
+                  std::cout << " (binning:";
+                  for (const Acts::BinningData &binning : a_child->container.value().constituentBinning ) {
+                     std::cout << " " << Acts::binningValueNames().at(binning.binvalue);
+                  }
+                  std::cout << ") ";
                }
-               std::cout << ") ";
+                              std::cout << " type:" << (elm.internal.has_value()
+                                                        ? a_child->internal.value().layerType : Acts::Surface::Other ) << std::endl;
+               std::cout << "| " << elm.extent.toString("|   ") << std::endl;
+               childs.push_back( &elm );
             }
-            std::cout << " type:" << a_child->layerType << std::endl;
-            std::cout << "| " << elm.extent.toString("|   ") << std::endl;
-            childs.push_back( &elm );
          }
          std::cout << "\\---" << a_child->name << std::endl << std::endl;
       }
@@ -430,9 +440,12 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
                             << " is not z-axis aligned." << std::endl;
                }
                else {
+                  element.proto_volume.container = Acts::ProtoVolume::ContainerStructure{};
                   double layer_thickness = a_layer["thickness"].get<double>();
                   ProtoVolume layer_volume;
-                  layer_volume.layerContainer=true;
+                  layer_volume.container=Acts::ProtoVolume::ContainerStructure{};
+                  layer_volume.container.value().layerContainer=true;
+                  layer_volume.internal = ProtoVolume::InternalStructure{};
                   {
                      std::stringstream tmp;
                      tmp << element.proto_volume.name << "_" << layer_id;
@@ -451,7 +464,7 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
                                              - layer_bounds.values().at(Acts::CylinderBounds::eHalfLengthZ),
                                              layer_transform.translation()[2]
                                              + layer_bounds.values().at(Acts::CylinderBounds::eHalfLengthZ));
-                     layer_volume.layerType = Acts::Surface::SurfaceType::Cylinder;
+                     layer_volume.internal.value().layerType = Acts::Surface::SurfaceType::Cylinder;
                      break;
                   }
                   case Acts::SurfaceBounds::eDisc: {
@@ -460,7 +473,7 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
                      layer_volume.extent.set(Acts::binZ,
                                              layer_transform.translation()[2] - layer_thickness *.5,
                                              layer_transform.translation()[2] + layer_thickness *.5);
-                     layer_volume.layerType = Acts::Surface::SurfaceType::Disc;
+                     layer_volume.internal.value().layerType = Acts::Surface::SurfaceType::Disc;
                      break;
                   }
                   default: {
@@ -470,19 +483,23 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
                      break;
                   }
                   }
-                  element.proto_volume.constituentVolumes.push_back(std::move(layer_volume));
+                  element.proto_volume.container.value().constituentVolumes.push_back(std::move(layer_volume));
                }
             }
          }
-         element.proto_volume.layerContainer = true;
+         element.proto_volume.container.value().layerContainer = true;
          // identify non overlapping domains of the layers
          unsigned int child_domain_overlaps=0;
-         for (unsigned int child_i=0; child_i<element.proto_volume.constituentVolumes.size(); ++child_i) {
-            for (unsigned int child_j=child_i+1; child_j<element.proto_volume.constituentVolumes.size(); ++child_j) {
+         for (unsigned int child_i=0;
+              child_i<element.proto_volume.container.value().constituentVolumes.size();
+              ++child_i) {
+            for (unsigned int child_j=child_i+1;
+                 child_j<element.proto_volume.container.value().constituentVolumes.size();
+                 ++child_j) {
                unsigned int domain_i;
                for (Acts::BinningValue bValue : acts_domain_type) {
-                  child_domain_overlaps |= (overlaps(element.proto_volume.constituentVolumes.at(child_i).extent,
-                                                     element.proto_volume.constituentVolumes.at(child_j).extent,
+                  child_domain_overlaps |= (overlaps(element.proto_volume.container.value().constituentVolumes.at(child_i).extent,
+                                                     element.proto_volume.container.value().constituentVolumes.at(child_j).extent,
                                                      bValue)
                                             << domain_i);
                   ++domain_i;
@@ -500,7 +517,7 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
          // enable binning for all domains in which the layers do not overlap
          for(unsigned int domain_i =0 ; domain_i < acts_domain_type.size(); ++domain_i) {
             if (    (element.noOverlapMask & (1<<domain_i) ) ) {
-               element.proto_volume.constituentBinning = {
+               element.proto_volume.container.value().constituentBinning = {
                   Acts::BinningData(Acts::closed,
                                     acts_domain_type.at(domain_i),
                   {0., 1.})};
@@ -606,14 +623,15 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
       }
       if (childs_processed ) {
          // @TODO sort childs by z or r
-         an_element.proto_volume.constituentVolumes.reserve(an_element.childs.size());
+         an_element.proto_volume.container = Acts::ProtoVolume::ContainerStructure{};
+         an_element.proto_volume.container.value().constituentVolumes.reserve(an_element.childs.size());
          if (!an_element.childs.empty()) {
-            bool layer_container = hierarchy.at(an_element.childs.at(0)).proto_volume.layerContainer;
+            bool layer_container = hierarchy.at(an_element.childs.at(0)).proto_volume.container.value().layerContainer;
             bool mixed=false;
 
             for(unsigned int child_i=1; child_i<an_element.childs.size(); ++child_i) {
                VolumeInfo &a_child_element = hierarchy.at(an_element.childs.at(child_i) );
-               if (a_child_element.proto_volume.layerContainer != layer_container) {
+               if (a_child_element.proto_volume.container.value().layerContainer != layer_container) {
                   mixed=true;
                   break;
                }
@@ -641,7 +659,7 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
             }
             if (!an_element.childs.empty()) {
                if (    (an_element.noOverlapMask & (1<<domain_i) ) ) {
-                  an_element.proto_volume.constituentBinning = {
+                  an_element.proto_volume.container.value().constituentBinning = {
                      Acts::BinningData(Acts::closed,
                                       acts_domain_type.at(domain_i),
                                        {0., 1.})};
@@ -678,14 +696,14 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
          if (n_domain_types==1) {
             switch (last_domain_type){
             case Acts::binR: {
-               if (an_element.proto_volume.layerContainer) {
-                  an_element.proto_volume.layerType = Acts::Surface::SurfaceType::Cylinder;
+               if (an_element.proto_volume.container.value().layerContainer) {
+                  an_element.proto_volume.internal.value().layerType = Acts::Surface::SurfaceType::Cylinder;
                }
                break;
             }
             case Acts::binZ: {
-               if (an_element.proto_volume.layerContainer) {
-                  an_element.proto_volume.layerType = Acts::Surface::SurfaceType::Disc;
+               if (an_element.proto_volume.container.value().layerContainer) {
+                  an_element.proto_volume.internal.value().layerType = Acts::Surface::SurfaceType::Disc;
                }
                break;
             }
@@ -695,15 +713,19 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
          }
          an_element.processed = childs_processed;
 
-         an_element.proto_volume.constituentVolumes.reserve( an_element.childs.size() );
+         an_element.proto_volume.container.value().constituentVolumes.reserve( an_element.childs.size() );
          bool childs_have_constituents=false;
          Acts::Surface::SurfaceType child_surface_type=Acts::Surface::Other;
          for(unsigned int child_i=0; child_i<an_element.childs.size(); ++child_i) {
-            an_element.proto_volume.constituentVolumes.push_back( std::move(hierarchy.at(an_element.childs.at(child_i) ).proto_volume) );
-            child_surface_type = (child_i==0 || child_surface_type == an_element.proto_volume.constituentVolumes.back().layerType)
-               ? an_element.proto_volume.constituentVolumes.back().layerType
+            an_element.proto_volume.container.value().constituentVolumes.push_back( std::move(hierarchy.at(an_element.childs.at(child_i) ).proto_volume) );
+            child_surface_type = ((child_i==0 && an_element.proto_volume.container.value().constituentVolumes.back().internal.has_value())
+                                  || (an_element.proto_volume.container.value().constituentVolumes.back().internal.has_value()
+                                      && child_surface_type
+                                      == an_element.proto_volume.container.value().constituentVolumes.back().internal.value().layerType))
+               ? an_element.proto_volume.container.value().constituentVolumes.back().internal.value().layerType
                : Acts::Surface::Other;
-            if (not an_element.proto_volume.constituentVolumes.back().constituentVolumes.empty()) {
+            if (an_element.proto_volume.container.value().constituentVolumes.back().container.has_value()
+                and not an_element.proto_volume.container.value().constituentVolumes.back().container.value().constituentVolumes.empty()) {
                childs_have_constituents=true;
             }
          }
@@ -916,6 +938,14 @@ TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& trackin
    std::shared_ptr<const Acts::TrackingGeometry> tmp(
       kdtTrackingGeometryBuilder.trackingGeometry(tContext).release());
    dumpTrackingGeometry( tmp.get() );
+
+   if (m_cfg.geantinoInputFileName.empty()) {
+      std::map<uint64_t,uint64_t> id_map = GeantinoReader::createIdRemap(m_cfg.geantinoInputFileName, *tmp,
+                                                                         static_cast<Long64_t>(m_cfg.maxGeantinoEntries) );
+      for (const std::pair<const uint64_t, uint64_t> elm : id_map) {
+         std::cout << "GeoId-map " << elm.first << "  " << elm.second << std::endl;
+      }
+   }
    return tmp;
 
 }
