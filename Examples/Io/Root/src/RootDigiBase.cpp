@@ -38,6 +38,11 @@ using HitParticlesMap = IndexMultimap<ActsFatras::Barcode>;
 
 //#define DEBUG_READ 1
 
+namespace {
+   inline double sqr(double a) { return a*a; }
+   unsigned int gCounter=0;
+}
+
 ActsExamples::RootDigiBase::RootDigiBase(
     ActsExamples::RootDigiBase::ConfigBase cfg,
     const std::string &name,
@@ -830,20 +835,198 @@ namespace {
       std::cout << "DEBUG log distance: " << log_distance << std::endl;
    }
 
+   static void checkSurface(unsigned int layer_i,
+                            unsigned int surface_i,
+                            const Acts::Surface *a_surface,
+                            const Acts::GeometryContext &geo_ctx,
+                            const Acts::Vector3 &global_pos,
+                            Acts::BoundaryCheck bcheck,
+                            const double max_error) {
+      if (a_surface) {
+         Acts::Vector3 dummy_momentum{1.,1.,1.};
+         Acts::Result<Acts::Vector2> result = a_surface->globalToLocal(geo_ctx,
+                                                                       global_pos,
+                                                                       dummy_momentum,
+                                                                       max_error);
+         if (result .ok()) {
+            Acts::Vector3 on_surface = a_surface->localToGlobal(geo_ctx,
+                                                                result.value(),
+                                                                dummy_momentum);
+            double distance2 = (global_pos - on_surface).squaredNorm();
+
+            const auto &trans = a_surface->transform(geo_ctx);
+            bool inside_bounds = a_surface->bounds().inside(result.value(), bcheck);
+
+            bool on_layer = a_surface->associatedLayer()
+               ? a_surface->associatedLayer()->isOnLayer(geo_ctx,global_pos, bcheck)
+               : false;
+            Acts::BoundaryCheck bcheck2(true,true, 1,1);
+            bool on_layer2 = (on_layer || a_surface->associatedLayer()->isOnLayer(geo_ctx,global_pos, bcheck2));
+
+            Acts::Vector3 center_pos = a_surface->center(geo_ctx);
+            std::cout << "DEBUG " <<gCounter << " " << layer_i << " " << surface_i
+                      << " : " << sqrt(sqr(center_pos[0])+sqr(center_pos[1])) << ",  " << center_pos[2]
+                      << " -> " << sqrt(sqr(on_surface[0])+sqr(on_surface[1])) << ",  " << on_surface[2]
+                      << " | " << sqrt(distance2) << " [ " << result.value()[0]  << ", "  << result.value()[1] << " ] "
+                      << (inside_bounds ? " (in-side bounds)" : "")
+                      << (on_layer ? " (on layer)" : (a_surface->associatedLayer()
+                                                      ? ( on_layer2 ? "(~on layer)" : "")
+                                                      : "(NO LAYER)")) << std::endl
+                      << "  " << a_surface->bounds()
+                      << std::endl;
+            if (!on_layer && inside_bounds && a_surface->associatedLayer()) {
+               const Acts::Layer *a_layer = a_surface->associatedLayer();
+               Acts::Result<Acts::Vector2> result2 = a_layer->surfaceRepresentation().globalToLocal(geo_ctx,
+                                                                              global_pos,
+                                                                              dummy_momentum,
+                                                                              3);
+               double distance3=std::numeric_limits<double>::max();
+               if (result2.ok()) {
+                  Acts::Vector3 on_surface3 = a_layer->surfaceRepresentation().localToGlobal(geo_ctx,
+                                                                                             result2.value(),
+                                                                                             dummy_momentum);
+                  distance3 = (global_pos - on_surface3).squaredNorm();
+               }
+               else {
+                  distance3=-1;
+               }
+
+               bool on_layer3 = a_surface->associatedLayer()->isOnLayer(geo_ctx,global_pos, bcheck);
+
+
+               std::cout << global_pos << " "
+                         << a_layer->geometryId()
+                         << (a_layer->representingVolume() ? " (vol) " : "(surf)")
+                         << distance3
+                         << " thickness : " << a_layer->thickness() << " : "
+                         << std::tuple<const Acts::Surface&,
+                                       const Acts::GeometryContext&>(a_layer->surfaceRepresentation(),
+                                                                     geo_ctx)
+                         << std::endl;
+               if (a_layer->representingVolume()) {
+                  std::cout << "   " << typeid(a_layer->representingVolume()).name() << std::endl;
+               }
+            }
+         }
+      }
+   }
+
+   static void dumpVolumeInfo(const Acts::TrackingVolume *final_volume,
+                              const Acts::GeometryContext &geo_ctx,
+                              const Acts::Vector3 &global_pos,
+                              double min_distance2) {
+      if (final_volume && std::abs(min_distance2)>1) {
+         if (gCounter<100) {
+            std::cerr << "ERROR no match  for " << sqrt(sqr(global_pos[0])+sqr(global_pos[1]))
+                      << ", " <<  global_pos[2] << " -> " << final_volume->volumeName()
+                      << " min surf. dist. " << sqrt(min_distance2)
+                      << std::endl;
+            for (const auto &boundary_surface :  final_volume->boundarySurfaces()) {
+                  std::cout << "DEBUG " << gCounter << " " << final_volume->volumeName()
+                            << std::tuple<const Acts::Surface&,
+                                          const Acts::GeometryContext&>(boundary_surface->surfaceRepresentation(),
+                                                                        geo_ctx)
+                            << std::endl;
+
+            }
+            bool on_layer=false;
+            Acts::BoundaryCheck bcheck(true,true, 1e-1,1e-1);
+            const double max_error = 1e-1;
+            {
+               unsigned layer_i=0;
+               Acts::Vector3 dummy_momentum{1.,1.,1.};
+               for (const auto &a_layer : final_volume->confinedLayers()->arrayObjects() ) {
+                  if (a_layer->isOnLayer(geo_ctx, global_pos, bcheck)) {
+                     std::cout << "DEBUG " << gCounter << " " << layer_i << " " << final_volume->volumeName()
+                               << " thickness : " << a_layer->thickness() << " "
+                               << std::tuple<const Acts::Surface&,
+                                             const Acts::GeometryContext&>(a_layer->surfaceRepresentation(),
+                                                                           geo_ctx)
+                               << std::endl;
+                     unsigned int surface_i=0;
+                     for (const Acts::Surface *a_surface: a_layer->surfaceArray()->surfaces()) {
+                        checkSurface(layer_i, surface_i, a_surface, geo_ctx,global_pos, bcheck, max_error);
+                        ++surface_i;
+                     }
+                     on_layer=true;
+                  }
+                  ++layer_i;
+               }
+            }
+
+            if (!on_layer) {
+               unsigned layer_i=0;
+               for (const auto &a_layer : final_volume->confinedLayers()->arrayObjects() ) {
+                  unsigned int n_surfaces=0;
+                  if (a_layer->surfaceArray()) {
+                     n_surfaces += a_layer->surfaceArray()->surfaces().size();
+                  }
+                  std::cout << "DEBUG " << gCounter << " " << layer_i << " " << final_volume->volumeName()
+                            << " thickness : " << a_layer->thickness() << " surfaces : " << n_surfaces << " "
+                            << std::tuple<const Acts::Surface&,
+                                          const Acts::GeometryContext&>(a_layer->surfaceRepresentation(),
+                                                                        geo_ctx)
+                            << std::endl;
+                  ++layer_i;
+               }
+
+               unsigned int idx=0;
+               final_volume->visitSurfaces([&geo_ctx, &idx, &global_pos, &bcheck, &max_error](const Acts::Surface* surface) {
+                     checkSurface(99, idx, surface, geo_ctx,global_pos, bcheck, max_error);
+
+                     // Acts::Vector3 center_pos = surface->center(geo_ctx);
+                     // std::cout << "DEBUG " << gCounter << " " << idx << " surface of " << final_volume->volumeName()
+                     //           << " : " << sqrt(sqr(center_pos[0])+sqr(center_pos[1])) << ",  " << center_pos[2]
+                     //           << std::endl;
+                     ++idx;
+                  });
+            }
+            ++gCounter;
+         }
+      }
+   }
+
+   template <typename visitor_t>
+   void visitLayerSurfaces(const Acts::TrackingVolume *volume,
+                           const Acts::GeometryContext&geo_ctx,
+                           const Acts::Vector3 &global_pos,
+                           const Acts::BoundaryCheck &bcheck,
+                           visitor_t&& visitor) {
+      if (volume) {
+         for (const auto &a_layer : volume->confinedLayers()->arrayObjects() ) {
+            if (a_layer->isOnLayer(geo_ctx, global_pos, bcheck)) {
+               for (const Acts::Surface *a_surface: a_layer->surfaceArray()->surfaces()) {
+                  visitor(a_surface);
+               }
+               return;
+            }
+         }
+         std::cout << "DEBUG no matching layer in " << volume->volumeName() << " for "
+                   << sqrt(sqr(global_pos[0])+sqr(global_pos[1])) << " , "
+                   << global_pos[2]
+                   << " search all surfaces."
+                   << std::endl;
+         dumpVolumeInfo(volume, geo_ctx, global_pos, std::numeric_limits<double>::max());
+         volume->visitSurfaces(visitor);
+      }
+   }
+
+
    std::pair<Acts::GeometryIdentifier,bool> findGeoId(const ActsExamples::AlgorithmContext& ctx,
-                                      const Acts::TrackingGeometry &trackingGeometry,
-                                      std::unordered_map<unsigned long, Acts::GeometryIdentifier> &geo_map,
-                                      unsigned long detector_element_id,
-                                      const Acts::Vector3 &global_pos,
+                                                      const Acts::TrackingGeometry &trackingGeometry,
+                                                      std::unordered_map<unsigned long, Acts::GeometryIdentifier> &geo_map,
+                                                      unsigned long detector_element_id,
+                                                      const Acts::Vector3 &global_pos,
                                                       const double &max_error,
-                                                      bool dump_surface=false) {
+                                                      bool dump_surface=false,
+                                                      bool debug=true) {
 
       std::pair<Acts::GeometryIdentifier,bool> ret{};
       //std::regex ignore(".*HGTD.*");
       std::unordered_map<unsigned long, Acts::GeometryIdentifier>::const_iterator
          geomap_iter = geo_map.find(detector_element_id);
-      //      if (geomap_iter == geo_map.end()) {
-      {
+      if (debug || geomap_iter == geo_map.end()) {
+         //{
 
          const Acts::TrackingVolume* volume = trackingGeometry.lowestTrackingVolume(ctx.geoContext,
                                                                               global_pos);
@@ -853,11 +1036,22 @@ namespace {
          //                                               global_pos,
          //                                               max_error);
          // }
+         double min_distance2=std::numeric_limits<double>::max();
          if (final_volume) {
             const Acts::Surface* min_surface=nullptr;
-            double min_distance2=std::numeric_limits<double>::max();
 
-            final_volume->visitSurfaces([&ctx, &max_error, &global_pos, &min_distance2, &min_surface, detector_element_id](const Acts::Surface* surface) {
+            //            final_volume->visitSurfaces()
+            Acts::BoundaryCheck bcheck(true,true, 1e-1,1e-1);
+            visitLayerSurfaces(final_volume,
+                               ctx.geoContext,
+                               global_pos,
+                               bcheck,
+                               [&ctx,
+                                &max_error,
+                                &global_pos,
+                                &min_distance2,
+                                &min_surface,
+                                detector_element_id](const Acts::Surface* surface) {
                   // if (surface->associatedLayer()
                   //     && surface->associatedLayer()->trackingVolume()
                   //     && std::regex_match(surface->associatedLayer()->trackingVolume()->volumeName(), ignore)) return;
@@ -876,7 +1070,7 @@ namespace {
                   //    //                            << " trans " <<surface->transform(ctx.geoContext)
                   //           << std::endl;
                   const auto &trans = surface->transform(ctx.geoContext);
-                  Acts::BoundaryCheck bcheck(true,true, 1e-5,1e-5);
+                  Acts::BoundaryCheck bcheck(true,true, 1e-1,1e-1);
                   bool inside_bounds = surface->bounds().inside(result.value(), bcheck);
                   // if (!inside_bounds ) {
                   //    const Acts::AnnulusBounds * annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &surface->bounds() );
@@ -962,6 +1156,8 @@ namespace {
                            ++corner_i;
                         }
                      }
+                     dumpVolumeInfo(final_volume, ctx.geoContext, global_pos, min_distance2);
+
 
                   }
 
@@ -983,10 +1179,12 @@ namespace {
                      insert_result = geo_map.insert( std::make_pair(detector_element_id, layer->geometryId()));
                   if (insert_result.second) {
                      m_destinationMultiplicity[insert_result.first->second].updateBox(global_pos);
-                      std::cout << "DEBUG detector element " << detector_element_id << " mapped to "
-                                << insert_result.first->second << " distance=" << sqrt(min_distance2)
-                                << " pos " << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2]
-                                << std::endl;
+                     if (debug) {
+                        std::cout << "DEBUG detector element " << detector_element_id << " mapped to "
+                                  << insert_result.first->second << " distance=" << sqrt(min_distance2)
+                                  << " pos " << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2]
+                                  << std::endl;
+                     }
                      return std::make_pair(insert_result.first->second,
                                            sqrt(min_distance2) < 1e-3);
                   }
@@ -1014,7 +1212,12 @@ namespace {
          std::stringstream msg;
          msg << "No matching geometry element found for " << detector_element_id  <<  " pos: "
              << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2] << " .";
-         throw std::runtime_error( msg.str() );
+         //         throw std::runtime_error( msg.str() );
+         std::cerr << msg.str() << std::endl;
+         dumpVolumeInfo(final_volume, ctx.geoContext, global_pos, min_distance2);
+
+         return std::make_pair(0u,false);
+
       }
       return std::make_pair(geomap_iter->second,false);
    }
