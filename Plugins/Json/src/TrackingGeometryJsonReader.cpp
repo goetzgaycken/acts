@@ -414,6 +414,8 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
       }
       if (value.contains("layers")) {
          nlohmann::json layer_list  = value.at("layers");
+         if (not layer_list.empty()) {
+            element.proto_volume.container = Acts::ProtoVolume::ContainerStructure{};
          for( nlohmann::json a_layer : layer_list) {
             unsigned int layer_id = a_layer["layer"].get<unsigned int>();
             std::shared_ptr<Acts::Surface> layer_surface = Acts::surfaceFromJson(a_layer);
@@ -440,7 +442,6 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
                             << " is not z-axis aligned." << std::endl;
                }
                else {
-                  element.proto_volume.container = Acts::ProtoVolume::ContainerStructure{};
                   double layer_thickness = a_layer["thickness"].get<double>();
                   ProtoVolume layer_volume;
                   layer_volume.container=Acts::ProtoVolume::ContainerStructure{};
@@ -523,6 +524,8 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
                   {0., 1.})};
             }
          }
+         }
+
 
       }
    }
@@ -623,9 +626,9 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
       }
       if (childs_processed ) {
          // @TODO sort childs by z or r
-         an_element.proto_volume.container = Acts::ProtoVolume::ContainerStructure{};
-         an_element.proto_volume.container.value().constituentVolumes.reserve(an_element.childs.size());
          if (!an_element.childs.empty()) {
+            an_element.proto_volume.container = Acts::ProtoVolume::ContainerStructure{};
+            an_element.proto_volume.container.value().constituentVolumes.reserve(an_element.childs.size());
             bool layer_container = hierarchy.at(an_element.childs.at(0)).proto_volume.container.value().layerContainer;
             bool mixed=false;
 
@@ -939,7 +942,7 @@ TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& trackin
       kdtTrackingGeometryBuilder.trackingGeometry(tContext).release());
    dumpTrackingGeometry( tmp.get() );
 
-   if (m_cfg.geantinoInputFileName.empty()) {
+   if (! m_cfg.geantinoInputFileName.empty()) {
       std::map<uint64_t,uint64_t> id_map = GeantinoReader::createIdRemap(m_cfg.geantinoInputFileName, *tmp,
                                                                          static_cast<Long64_t>(m_cfg.maxGeantinoEntries) );
       for (const std::pair<const uint64_t, uint64_t> elm : id_map) {
