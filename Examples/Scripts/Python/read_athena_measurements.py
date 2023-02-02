@@ -2,13 +2,41 @@
 import os
 import pathlib, acts, acts.examples, acts.examples.itk
 
+from acts.examples.reconstruction import (
+    addSeeding,
+    SeedingAlgorithm,
+    TruthSeedRanges,
+)
+
+ttbar_pu200 = True
+
 u = acts.UnitConstants
 geo_dir = pathlib.Path("acts-itk")
 outputDir = pathlib.Path.cwd() / "itk_output"
 
-detector, trackingGeometry, decorators = acts.examples.itk.buildITkGeometry(geo_dir,
+if False :
+    detector, trackingGeometry, decorators = acts.examples.itk.buildITkGeometry(geo_dir,
                                                                             logLevel=acts.logging.WARNING,
+                                                                            )
+
+
+config = acts.MaterialMapJsonConverter.Config()
+customLogLevel = acts.examples.defaultLogging(logLevel=acts.logging.INFO)
+mdecorator = acts.JsonMaterialDecorator(
+    rConfig=config,
+    level=customLogLevel(minLevel=acts.logging.WARNING),
+    jFileName="acts-ws/build-sft/geometry-maps-volbounds_2023_material.json",
 )
+
+jsonTGReaderCfg =     acts.examples.TrackingGeometryJsonReader.Config(detectorName="ITK",
+                                                    toolLogLevel = acts.logging.VERBOSE,
+                                                    logLevel = acts.logging.VERBOSE,
+                                                    # geantinoInputFileName = "geant4_material_tracks.root",
+                                                    # maxGeantinoEntries = 1000
+                                                   )
+jsonTGReader=acts.examples.TrackingGeometryJsonReader(jsonTGReaderCfg)
+trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps-volbounds_2023.json", mdecorator)
+
 print ("buildITkGeometry done")
 
 def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
@@ -59,6 +87,24 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
     )
 
     s.addReader(digiReader)
+
+    field = acts.examples.MagneticFieldMapXyz(str(geo_dir / "bfield/ATLAS-BField-xyz.root"))
+
+    addSeeding(
+        s,
+        trackingGeometry,
+        field,
+        TruthSeedRanges(pt=(.1 * u.GeV, None), eta=(-4.0, 4.0), nHits=(9, None))
+        if ttbar_pu200
+        else TruthSeedRanges(),
+        *acts.examples.itk.itkSeedingAlgConfig("PixelSpacePoints"),
+        #    seedingAlgorithm = SeedingAlgorithm.Orthogonal,
+        inputParticles = "particles_final",
+        seedingAlgorithm = SeedingAlgorithm.Default,
+        geoSelectionConfigFile=geo_dir / "itk-hgtd/geoSelection-ITk.json",
+        outputDirRoot=outputDir,
+    )
+
 
     return s
 
