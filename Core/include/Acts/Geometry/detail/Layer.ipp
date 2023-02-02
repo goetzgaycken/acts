@@ -71,7 +71,8 @@ inline bool Layer::isOnLayer(const GeometryContext& gctx,
                              const Vector3& position,
                              const BoundaryCheck& bcheck) const {
   if (m_representingVolume != nullptr) {
-    return m_representingVolume->inside(position);
+    const double tolerance = std::min(bcheck.tolerance()[0],bcheck.tolerance()[1]);
+    return m_representingVolume->inside(position,tolerance);
   }
   return (surfaceRepresentation())
       .isOnSurface(gctx, position, Vector3::Zero(), bcheck);
