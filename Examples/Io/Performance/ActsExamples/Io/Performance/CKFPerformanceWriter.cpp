@@ -71,9 +71,9 @@ ActsExamples::CKFPerformanceWriter::CKFPerformanceWriter(
   m_duplicationPlotTool.book(m_duplicationPlotCache);
   m_trackSummaryPlotTool.book(m_trackSummaryPlotCache);
 
-  std::cout << "DEBUG ActsExamples::CKFPerformanceWriter pid " << getpid() << " sleep..."<< std::endl;
-  sleep(15);
-  std::cout << "DEBUG ActsExamples::CKFPerformanceWriter ... continue." << std::endl;
+  //  std::cout << "DEBUG ActsExamples::CKFPerformanceWriter pid " << getpid() << " sleep..."<< std::endl;
+  //sleep(15);
+  //std::cout << "DEBUG ActsExamples::CKFPerformanceWriter ... continue." << std::endl;
 }
 
 ActsExamples::CKFPerformanceWriter::~CKFPerformanceWriter() {
@@ -621,6 +621,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   std::map<ActsFatras::Barcode, size_t >                          barcodeToParticle;
   std::map<ActsFatras::Barcode, std::map<unsigned int, Counter> > trajectoriesPerParticle;
   std::map<ActsFatras::Barcode, Counter >                         hitsPerParticle;
+  std::map<ActsFatras::Barcode, std::vector<Index> >              particleToHit;
   std::map<Index, std::set< unsigned int > >                      hitTrajectoryMap;
   std::map<unsigned int, std::vector<Index> >                     trajectoryToHits;
   std::map<unsigned int, std::map<ActsFatras::Barcode, Counter> > trajectoryBarcodeMap;
@@ -670,6 +671,10 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
            for (unsigned int pt_i=0; pt_i < stat_pt_bins.size(); ++pt_i) {
               if (particle_pt < stat_pt_bins.at(pt_i) ) break;
               ++hit_share_count[pt_i];
+           }
+           std::vector<Index> &hits = particleToHit[particle_iter->particleId()];
+           if (std::find(hits.begin(),hits.end(), meas_i) == hits.end()) {
+              particleToHit[particle_iter->particleId()].push_back( meas_i );
            }
         }
         ++hitsPerParticle[hitParticle.second];
@@ -892,6 +897,110 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
      }
   }
 
+  // dump truth particles :
+  std::vector< std::pair<float, const SimParticle *> > particle_order;
+  particle_order.reserve(particles.size());
+  unsigned int idx=0;
+  for (const SimParticle &a_particle : particles) {
+     double particle_pt = a_particle.transverseMomentum();
+     particle_order.push_back(std::make_pair(particle_pt, &a_particle));
+  }
+
+  {
+  std::sort( particle_order.begin(),
+             particle_order.end(),
+             [](const std::pair<float, const SimParticle *> &a,
+                const std::pair<float, const SimParticle *> &b) { return a.first > b.first; }  );
+  constexpr unsigned int n_particles_per_column=8;
+  std::array<const char *,5> row_labels{"PID", "barcode", "pt", "phi", "theta"};
+
+  const Acts::TrackingGeometry *tg=m_cfg.trackingGeometry.get();
+  const Acts::GeometryContext &geo_ctx = ctx.geoContext;
+
+
+  for (unsigned int part_i=0; part_i < std::min(1000ul,particle_order.size()); ++part_i) {
+     const SimParticle &a_particle = *(particle_order.at(part_i).second);
+     std::vector<Index> &hits = particleToHit[a_particle.particleId()];
+     std::sort(hits.begin(),hits.end(), [&measurements,tg, &geo_ctx](const Index &hit_a, const Index &hit_b) {
+           Acts::Vector3 pos_a( globalCoords(*tg, geo_ctx,measurements.at(hit_a)) );
+           Acts::Vector3 pos_b( globalCoords(*tg, geo_ctx,measurements.at(hit_b)) );
+           return Acts::VectorHelpers::perp(pos_a) < Acts::VectorHelpers::perp(pos_b);
+        });
+     std::cout << "PART " << a_particle.pdg()
+               << " " << a_particle.transverseMomentum();
+     Acts::Vector3 direction(a_particle.unitDirection());
+     for (unsigned int coord_i=0; coord_i<3; ++coord_i) {
+        std::cout << " " << direction[coord_i];
+     }
+     std::cout << " " << hits.size();
+     for (const Index &hit_i : hits) {
+        Acts::Vector3 pos_a( globalCoords(*tg, geo_ctx,measurements.at(hit_i)) );
+        for (unsigned int coord_i=0; coord_i<3; ++coord_i) {
+           std::cout << " " << pos_a[coord_i];
+        }
+     }
+     std::cout << std::endl;
+  }
+
+
+  for (unsigned int idx_start=0; idx_start < particle_order.size(); idx_start += n_particles_per_column) {
+     unsigned int idx_end = std::min( idx_start + n_particles_per_column, static_cast<unsigned int>(particle_order.size()));
+     unsigned int max_rows=0;
+
+     for (unsigned int part_i = idx_start; part_i < idx_end; ++part_i) {
+        const SimParticle &a_particle = *(particle_order.at(part_i).second);
+        std::vector<Index> &hits = particleToHit[a_particle.particleId()];
+        max_rows=std::max(max_rows, static_cast<unsigned int>(hits.size()));
+        std::sort(hits.begin(),hits.end(), [&measurements,tg, &geo_ctx](const Index &hit_a, const Index &hit_b) {
+              Acts::Vector3 pos_a( globalCoords(*tg, geo_ctx,measurements.at(hit_a)) );
+              Acts::Vector3 pos_b( globalCoords(*tg, geo_ctx,measurements.at(hit_b)) );
+              return Acts::VectorHelpers::perp(pos_a) < Acts::VectorHelpers::perp(pos_b);
+           });
+
+     }
+
+     for (unsigned int row_i=0; row_i< max_rows; ++row_i) {
+        std::cout << std::setw(20);
+        if (row_i>=0 and row_i<row_labels.size()) {
+           std::cout << std::setw(20) << row_labels.at(row_i);
+        }
+        else {
+           std::cout << std::setw(20) << " ";
+        }
+        for (unsigned int part_i = idx_start; part_i < idx_end; ++part_i) {
+           const SimParticle &a_particle = *(particle_order.at(part_i).second);
+           const std::vector<Index> &hits = particleToHit[a_particle.particleId()];
+           std::cout << " " << std::setw(16);
+           if (row_i<=5u) {
+              switch (row_i) {
+              case 0: { std::cout << a_particle.pdg(); break; }
+              case 1: { std::stringstream msg; msg << a_particle.particleId(); std::cout << msg.str(); break; }
+              case 2: { std::cout << a_particle.transverseMomentum(); break; }
+              case 3: { Acts::Vector3 direction(a_particle.unitDirection());std::cout<<Acts::VectorHelpers::phi(direction);break;}
+              case 4: { Acts::Vector3 direction(a_particle.unitDirection());std::cout<<Acts::VectorHelpers::theta(direction);break;}
+              case 5: { std::cout << " "; break;}
+              }
+           }
+           else if (row_i>=6 && row_i<6+max_rows) {
+              std::stringstream msg;
+              if (row_i-6<hits.size()) {
+                 msg << hits[row_i-6] <<"(";
+                 std::map<Index, std::set< unsigned int > >::const_iterator
+                    hit_iter = hitTrajectoryMap.find( hits.at(row_i-6) );
+                 if (hit_iter != hitTrajectoryMap.end()) {
+                    for (unsigned int traj : hit_iter->second) {
+                       msg << traj << ",";
+                    }
+                 }
+                 msg << ")";
+              }
+              std::cout << msg.str();
+           }
+        }
+        std::cout << std::endl;
+     }
+  }
+  }
 
   processed.reserve(trajectoryIdMap.size());
   hit_r.resize( max_hit_index+1, 0.);
