@@ -51,8 +51,10 @@ protected:
    Acts::ProtoDetector createProtoDetector(const nlohmann::json& tracking_geometry_description,
                                            const std::vector<std::shared_ptr<Acts::Surface>> &surfaces,
                                            const std::vector< std::vector< unsigned int >> &surfaces_per_volume) const;
-   std::pair<std::vector<std::shared_ptr<Acts::Surface>>, std::vector< std::vector< unsigned int >> >
-      createSurfaces(const nlohmann::json& tracking_geometry_description) const ;
+   std::tuple<std::vector<std::shared_ptr<Acts::Surface>>,
+              std::vector< std::vector< unsigned int >>,
+              std::vector<std::unique_ptr<DetectorElementBase>> >
+      createSurfaces(const nlohmann::json& tracking_geometry_description) const;
 
    template <typename enum_t, class array_t>
    static enum_t getNamedEnum(const array_t &enum_names, const std::string &the_name, const std::string &error_head="Unknwon enum: ") {

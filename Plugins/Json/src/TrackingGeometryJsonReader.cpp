@@ -39,7 +39,59 @@
 // dump geom
 #include <deque>
 
+#include <signal.h>
+#include <unistd.h>
+
+
+namespace Test {
+   class IdentifiableDetectorElement : public Acts::DetectorElementBase
+   {
+   public:
+      IdentifiableDetectorElement(const Acts::Surface *surface, uint64_t detector_element_id, float thickness)
+        : m_surface(surface),
+          m_transform( surface->transform(Acts::GeometryContext()) ),
+          m_id(detector_element_id),
+          m_thickness(thickness)
+      {}
+
+      ~IdentifiableDetectorElement() {
+         //         std::cout << "IdentifiableDetectorElement::dtor " << m_id << std::endl;
+      }
+
+      /// @param gctx The current geometry context object, e.g. alignment
+      const Acts::Transform3& transform([[maybe_unused]] const Acts::GeometryContext& gctx) const override
+        { return m_transform; }
+      /// Return surface representation
+      const Acts::Surface& surface() const override
+        { return *m_surface; }
+
+      double thickness() const override { return m_thickness; }
+
+      uint64_t detectorId() const { return m_id; }
+   private:
+      const Acts::Surface *m_surface;
+      Acts::Transform3 m_transform;
+      uint64_t m_id;
+      float m_thickness;
+   };
+}
+using namespace Test;
+
 namespace {
+
+   class TrackingGeometryWithDetectorElements : public Acts::TrackingGeometry {
+   public:
+      TrackingGeometryWithDetectorElements(const Acts::MutableTrackingVolumePtr& highestVolume,
+                                           const Acts::IMaterialDecorator* materialDecorator,
+                                           std::vector<std::unique_ptr<Acts::DetectorElementBase> > &&detector_elements)
+         : Acts::TrackingGeometry(highestVolume,materialDecorator),
+           m_detectorElements(std::move(detector_elements))
+      {
+      }
+   private:
+      std::vector<std::unique_ptr<Acts::DetectorElementBase> > m_detectorElements;
+   };
+
 
    inline double sqr(double a) { return a*a; }
    class Stat {
@@ -769,7 +821,9 @@ namespace {
    };
 }
 
-std::pair<std::vector<std::shared_ptr<Acts::Surface>>, std::vector< std::vector< unsigned int >> >
+std::tuple<std::vector<std::shared_ptr<Acts::Surface>>,
+           std::vector< std::vector< unsigned int >>,
+           std::vector<std::unique_ptr<DetectorElementBase>> >
 TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geometry_description) const {
    nlohmann::json surfaces_in = tracking_geometry_description["Surfaces"];
    int version = surfaces_in["acts-geometry-hierarchy-map"]["format-version"].get<int>();
@@ -780,10 +834,14 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
    nlohmann::json surface_list  = surfaces_in.at("entries");
 
 
-   std::pair<std::vector<std::shared_ptr<Acts::Surface>>, std::vector< std::vector< unsigned int >> >
+   std::tuple<std::vector<std::shared_ptr<Acts::Surface>>,
+              std::vector< std::vector< unsigned int >>,
+              std::vector<std::unique_ptr<DetectorElementBase>> >
       surfaces_out;
-   surfaces_out.first.reserve( surface_list.size() );
+   std::get<0>(surfaces_out).reserve( surface_list.size() );
    std::map<LayerId,LayerSurfaceInfo> layer_surface_map;
+
+   Acts::GeometryContext geo_ctx;
 
    unsigned int counter_i=0;
    for( nlohmann::json a_surface : surface_list) {
@@ -818,13 +876,35 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
 
          std::pair<std::map< LayerId, LayerSurfaceInfo>::iterator, bool >
             insert_ret = layer_surface_map.insert(std::make_pair( layer_id, LayerSurfaceInfo()));
+         // uint64_t geo_id = a_surface["value"]["geo_id"].get<uint64_t>();
+         // if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
+         //    std::array<Acts::ActsScalar, 3> tdata = a_surface["value"]["transform"]["translation"];
+         //    std::cout <<  "Surface " << geo_id<< " " << static_cast<const void *>(surface_ptr.get())
+         //              << std::tuple<const Acts::Surface&,
+         //                            const Acts::GeometryContext&>(*surface_ptr,geo_ctx)
+         //              << std::endl << "transform:"
+         //              << tdata.at(0) << ", " <<  tdata.at(1) << ", " << tdata.at(2)
+         //              << std::endl;
 
+         // }
+
+         if (a_surface["value"].contains("detID") ) {
+            uint64_t det_id = a_surface["value"]["detID"].get<uint64_t>();
+            std::get<2>(surfaces_out).push_back(std::make_unique<::Test::IdentifiableDetectorElement>( surface_ptr.get(), det_id, 0.f));
+            surface_ptr->associateDetectorElement( std::get<2>(surfaces_out).back().get() );
+            const ::Test::IdentifiableDetectorElement *
+               det_element=dynamic_cast<const ::Test::IdentifiableDetectorElement *>(surface_ptr->associatedDetectorElement());
+            // std::cout << "DEBUG associate det element " <<  (det_element ? det_element->detectorId() : 0u)
+            //           << " to " << surface_ptr->geometryId().value()
+            //           << " type " << (det_element ? typeid(*det_element).name() : "NULL" )
+            //           << std::endl;
+         }
          if (a_surface.contains("sensitive")) {
-            surfaces_out.first.push_back( std::move(surface_ptr) );
-            if (layer_id.volumeId() >= surfaces_out.second.size()) {
-               surfaces_out.second.resize( layer_id.volumeId() + 1 );
+            std::get<0>(surfaces_out).push_back( std::move(surface_ptr) );
+            if (layer_id.volumeId() >= std::get<1>(surfaces_out).size()) {
+               std::get<1>(surfaces_out).resize( layer_id.volumeId() + 1 );
             }
-            surfaces_out.second.at(layer_id.volumeId()).push_back(surfaces_out.first.size()-1);
+            std::get<1>(surfaces_out).at(layer_id.volumeId()).push_back(std::get<0>(surfaces_out).size()-1);
             ++insert_ret.first->second.nSensitiveSurfaces;
          }
          else {
@@ -856,11 +936,11 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
          }
 
          for ( std::shared_ptr<Acts::Surface> &a_surface_ptr : surface_info.second.nonSensitiveSurfaces ) {
-            surfaces_out.first.push_back( std::move(a_surface_ptr) );
-            if (surface_info.first.volumeId() >= surfaces_out.second.size()) {
-               surfaces_out.second.resize( surface_info.first.volumeId() + 1 );
+            std::get<0>(surfaces_out).push_back( std::move(a_surface_ptr) );
+            if (surface_info.first.volumeId() >= std::get<1>(surfaces_out).size()) {
+               std::get<1>(surfaces_out).resize( surface_info.first.volumeId() + 1 );
             }
-            surfaces_out.second.at(surface_info.first.volumeId()).push_back(surfaces_out.first.size()-1);
+            std::get<1>(surfaces_out).at(surface_info.first.volumeId()).push_back(std::get<0>(surfaces_out).size()-1);
             std::cout << "DEBUG add non sensitive surface " << idx << " for volume " << surface_info.first.volumeId()
                       << " layer " << surface_info.first.layerId()
                       << std::endl;
@@ -871,7 +951,7 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
       else {
       }
    }
-   std::cout << "DEBUG surfaces-out total " <<  surfaces_out.first.size() << " sensitive: " << sensitive
+   std::cout << "DEBUG surfaces-out total " <<  std::get<0>(surfaces_out).size() << " sensitive: " << sensitive
              << " non-sensitive " << non_sensitive << std::endl;
 
    return surfaces_out;
@@ -881,7 +961,8 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
 std::shared_ptr<const Acts::TrackingGeometry>
 TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& tracking_geometry_description,
                                                    std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const {
-   auto [surfaces, surfaces_per_volume] = createSurfaces( tracking_geometry_description);
+   auto [surfaces, surfaces_per_volume, detector_elements]
+     = createSurfaces( tracking_geometry_description);
 
    Acts::ProtoDetector detector(  createProtoDetector(tracking_geometry_description, surfaces, surfaces_per_volume) );
    std::cout << detector.toString("") << std::endl;
@@ -932,6 +1013,18 @@ TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& trackin
    kdtgConfig.surfaces = std::move(surfaces);
    kdtgConfig.protoDetector = std::move(detector);
    kdtgConfig.materialDecorator = std::move(mdecorator);
+
+   //  if (m_cfg.stop) {
+   //     std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
+   //     kill(getpid(), SIGSTOP);
+     //  }
+
+   kdtgConfig.creator=[&detector_elements](const MutableTrackingVolumePtr& a_highestVolume,
+                         const IMaterialDecorator* a_materialDecorator) {
+      return std::unique_ptr<const TrackingGeometry>(new TrackingGeometryWithDetectorElements(a_highestVolume,a_materialDecorator,
+                                                                                              std::move(detector_elements)));
+   };
+
 
    // Make the builder
    auto kdtTrackingGeometryBuilder = Acts::KDTreeTrackingGeometryBuilder(
