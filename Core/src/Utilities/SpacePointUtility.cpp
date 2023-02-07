@@ -47,6 +47,14 @@ std::pair<Vector3, Vector2> SpacePointUtility::globalCoords(
   const auto geoId = slink->geometryId();
 
   const Surface* surface = m_config.trackingGeometry->findSurface(geoId);
+  if (!surface) {
+     std::cout << "ERROR no surface from measurement: " << std::endl;
+     std::visit([](const auto& x) { std::cout << x.parameters()
+                                              << " sourceLink " << x.sourceLink().geometryId().value()
+                                              << " " << x.sourceLink().geometryId()
+                                              << std::endl; }, meas);
+     throw std::runtime_error("Invalid sourceLink." );
+  }
   auto [localPos, localCov] = std::visit(
       [](const auto& measurement) {
         auto expander = measurement.expander();
