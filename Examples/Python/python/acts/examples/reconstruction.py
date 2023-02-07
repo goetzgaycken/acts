@@ -250,7 +250,7 @@ def addSeeding(
         )
     else:
         spacePoints = addSpacePointsMaking(
-            s, trackingGeometry, geoSelectionConfigFile, logLevel
+            s, trackingGeometry, geoSelectionConfigFile, acts.logging.VERBOSE # logLevel
         )
         # Run either: truth track finding or seeding
         if seedingAlgorithm == SeedingAlgorithm.TruthEstimated:
@@ -275,7 +275,7 @@ def addSeeding(
                 seedFinderOptionsArg,
                 seedFilterConfigArg,
                 spacePointGridConfigArg,
-                logLevel,
+                acts.logging.VERBOSE # logLevel,
             )
         elif seedingAlgorithm == SeedingAlgorithm.Orthogonal:
             logger.info("Using orthogonal seeding")
@@ -298,7 +298,7 @@ def addSeeding(
             inputSourceLinks="sourcelinks",
             outputTrackParameters="estimatedparameters",
             outputProtoTracks="prototracks_estimated",
-            trackingGeometry=trackingGeometry,
+             trackingGeometry=trackingGeometry,
             magneticField=field,
             **acts.examples.defaultKWArgs(
                 initialVarInflation=initialVarInflation,
@@ -707,19 +707,20 @@ def addSeedPerformanceWriters(
         )
     )
 
-    sequence.addWriter(
-        acts.examples.RootTrackParameterWriter(
-            level=customLogLevel(),
-            inputTrackParameters=outputTrackParameters,
-            inputProtoTracks=outputProtoTracks,
-            inputParticles=inputParticles,
-            inputSimHits="simhits",
-            inputMeasurementParticlesMap="measurement_particles_map",
-            inputMeasurementSimHitsMap="measurement_simhits_map",
-            filePath=str(outputDirRoot / "estimatedparams.root"),
-            treeName="estimatedparams",
+    if False :
+        sequence.addWriter(
+            acts.examples.RootTrackParameterWriter(
+                level=customLogLevel(),
+                inputTrackParameters=outputTrackParameters,
+                inputProtoTracks=outputProtoTracks,
+                inputParticles=inputParticles,
+                inputSimHits="simhits",
+                inputMeasurementParticlesMap="measurement_particles_map",
+                inputMeasurementSimHitsMap="measurement_simhits_map",
+                filePath=str(outputDirRoot / "estimatedparams.root"),
+                treeName="estimatedparams",
+            )
         )
-    )
 
 
 def addKalmanTracks(
@@ -923,7 +924,7 @@ def addTrajectoryWriters(
     trackingGeometry: acts.TrackingGeometry = None,
     outputDirCsv: Optional[Union[Path, str]] = None,
     outputDirRoot: Optional[Union[Path, str]] = None,
-    writeStates: bool = True,
+    writeStates: bool = False,
     writeSummary: bool = True,
     writeCKFperformance: bool = True,
     writeFinderPerformance: bool = True,
@@ -937,7 +938,7 @@ def addTrajectoryWriters(
         if not outputDirRoot.exists():
             outputDirRoot.mkdir()
 
-        if writeStates:
+        if writeStates and False:
             # write track states from CKF
             trackStatesWriter = acts.examples.RootTrajectoryStatesWriter(
                 level=customLogLevel(),
@@ -964,7 +965,7 @@ def addTrajectoryWriters(
                 # since the unselected CKF track might have a majority particle not in the
                 # filtered particle collection. This could be avoided when a seperate track
                 # selection algorithm is used.
-                inputParticles="particles_selected",
+                inputParticles="particles_final", #"particles_selected",
                 inputMeasurementParticlesMap="measurement_particles_map",
                 filePath=str(outputDirRoot / f"tracksummary_{name}.root"),
                 treeName="tracksummary",
@@ -979,7 +980,7 @@ def addTrajectoryWriters(
                 inputTrajectories=trajectories,
                 inputMeasurementParticlesMap="measurement_particles_map",
                 trackingGeometry=trackingGeometry,
-                dumpDuplicates=False,
+                dumpDuplicates=True,
                 **acts.examples.defaultKWArgs(
                     # The bottom seed could be the first, second or third hits on the truth track
                     nMeasurementsMin=ckfPerformanceConfig.nMeasurementsMin,
@@ -1286,8 +1287,10 @@ def addVertexFitting(
             trackSelector.config.outputTrackParameters if trackParameters else ""
         )
 
-    inputParticles = "particles_input"
-    selectedParticles = "particles_selected"
+    # inputParticles = "particles_input"
+    #selectedParticles = "particles_selected"
+    inputParticles = "particles_final"
+    selectedParticles = "particles_final"
     outputVertices = "fittedVertices"
 
     outputTime = ""

@@ -6,6 +6,9 @@ from acts.examples.reconstruction import (
     addSeeding,
     SeedingAlgorithm,
     TruthSeedRanges,
+    addCKFTracks,
+    CKFPerformanceConfig,
+    TrackSelectorRanges,
 )
 
 ttbar_pu200 = True
@@ -83,7 +86,7 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
 
         surfaceCenterFile = '/tmp/surface_centers.txt',
         # when set to true, prrogram will be stopped upon construction to allow for a debugger to be attached
-        stop = False
+        stop = True
     )
 
     s.addReader(digiReader)
@@ -102,6 +105,15 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
         inputParticles = "particles_final",
         seedingAlgorithm = SeedingAlgorithm.Default,
         geoSelectionConfigFile=geo_dir / "itk-hgtd/geoSelection-ITk.json",
+        outputDirRoot=outputDir,
+    )
+
+    addCKFTracks(
+        s,
+        trackingGeometry,
+        field,
+        CKFPerformanceConfig(ptMin=1.0 * u.GeV if ttbar_pu200 else 0.0, nMeasurementsMin=6),
+        TrackSelectorRanges(pt=(1.0 * u.GeV, None), absEta=(None, 4.0), removeNeutral=True),
         outputDirRoot=outputDir,
     )
 
