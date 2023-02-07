@@ -65,6 +65,8 @@ def runMaterialMapping(
                     else "geant4_material_tracks.root",
                 )
             ],
+            batchSizeMax =  10000,
+            entriesMax =    100000,
             readCachedSurfaceInformation=readCachedSurfaceInformation,
         )
     )
