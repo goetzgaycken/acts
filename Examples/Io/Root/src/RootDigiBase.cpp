@@ -38,6 +38,40 @@ using HitParticlesMap = IndexMultimap<ActsFatras::Barcode>;
 
 //#define DEBUG_READ 1
 
+
+namespace Test {
+   class IdentifiableDetectorElement : public Acts::DetectorElementBase
+   {
+   public:
+      IdentifiableDetectorElement(const Acts::Surface *surface, uint64_t detector_element_id, float thickness)
+        : m_surface(surface),
+          m_transform( surface->transform(Acts::GeometryContext()) ),
+          m_id(detector_element_id),
+          m_thickness(thickness)
+      {}
+
+      ~IdentifiableDetectorElement() {
+         //         std::cout << "IdentifiableDetectorElement::dtor " << m_id << std::endl;
+      }
+
+      /// @param gctx The current geometry context object, e.g. alignment
+      const Acts::Transform3& transform([[maybe_unused]] const Acts::GeometryContext& gctx) const override
+        { return m_transform; }
+      /// Return surface representation
+      const Acts::Surface& surface() const override
+        { return *m_surface; }
+
+      double thickness() const override { return m_thickness; }
+
+      uint64_t detectorId() const { return m_id; }
+   private:
+      const Acts::Surface *m_surface;
+      Acts::Transform3 m_transform;
+      uint64_t m_id;
+      float m_thickness;
+   };
+}
+
 namespace {
    inline double sqr(double a) { return a*a; }
    unsigned int gCounter=0;
@@ -99,11 +133,6 @@ void ActsExamples::RootDigiBase::setupTree() {
      // initially disable all branches, then enable all used branches
      m_tree->SetBranchStatus("*",0);
      m_tree->SetMakeClass(1);
-  }
-
-  if (m_cfg.stop) {
-     std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
-     kill(getpid(), SIGSTOP);
   }
 
   // setup the branches
@@ -577,10 +606,10 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
     std::lock_guard<std::mutex> lock(m_mutex);
 
 
-  if (m_cfg.stop) {
-     std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
-     kill(getpid(), SIGSTOP);
-  }
+  // if (m_cfg.stop) {
+  //    std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
+  //    kill(getpid(), SIGSTOP);
+  // }
 
   // std::regex ignore(".*HGTD_NOTHING.*");
 
@@ -705,6 +734,15 @@ std::map<int, ActsFatras::Barcode> ActsExamples::RootDigiReader::convertParticle
   m_truthVertices.checkDimensions();
   std::map<int, ActsFatras::Barcode> barcode_map;
   for (unsigned int particle_i = 0; particle_i < m_truthParticles.pdgId.size(); ++particle_i) {
+     // reject all non stable truth particles
+     if (m_truthParticles.status.at(particle_i) != 1) {
+        std::cout << "DEBUG reject non stable truth particle " << m_truthParticles.barcode.at(particle_i)
+                  << " "  << m_truthParticles.pdgId.at(particle_i)
+                  <<  " " << m_truthParticles.status.at(particle_i)
+                  << std::endl;
+        continue;
+     }
+
      // somehow map the input barcode and vertex index to the ActsFatras::Barcode
      unsigned int vertex_i = (m_truthParticles.n_prodVtxLink>0 && particle_i < static_cast<unsigned int>(m_truthParticles.n_prodVtxLink)
                               ? m_truthParticles.prodVtxLink_m_persIndex[ particle_i ]
@@ -731,6 +769,9 @@ std::map<int, ActsFatras::Barcode> ActsExamples::RootDigiReader::convertParticle
         ACTS_ERROR("Barcode " << m_truthParticles.barcode.at(particle_i) << " not unique. Old dest : " << insert_result.first->second
                    << " New dest " << pid);
      }
+     std::cout << "DEBUG " << insert_result.first->first  << " -> " << insert_result.first->second
+               << " ( " << m_truthParticles.barcode.at(particle_i) << " -> " << pid << ")" << std::endl;
+
      //  set vertix part
      ActsFatras::Particle particle(pid,
                                    Acts::PdgParticle(m_truthParticles.pdgId.at(particle_i)),
@@ -748,6 +789,10 @@ std::map<int, ActsFatras::Barcode> ActsExamples::RootDigiReader::convertParticle
                               m_truthVertices.z.at(vertex_i),
                               m_truthVertices.t.at(vertex_i));
      }
+
+
+
+     particles.insert( std::move(particle) );
   }
   ctx.eventStore.add(m_cfg.particles, std::move(particles));
   return barcode_map;
@@ -855,7 +900,15 @@ namespace {
             double distance2 = (global_pos - on_surface).squaredNorm();
 
             const auto &trans = a_surface->transform(geo_ctx);
-            bool inside_bounds = a_surface->bounds().inside(result.value(), bcheck);
+            std::array<Acts::BoundaryCheck,3> tests{ Acts::BoundaryCheck(true,true, 1e-1,1e-1),
+                  Acts::BoundaryCheck(true,true, 1e-2,1e-2),
+                  Acts::BoundaryCheck(true,true, 1e-3,1e-3) };
+
+            unsigned int tol_i;
+            for (tol_i=tests.size(); tol_i-->0; ) {
+               if (a_surface->bounds().inside(result.value(), tests.at(tol_i))) break;
+            }
+            ++tol_i;
 
             bool on_layer = a_surface->associatedLayer()
                ? a_surface->associatedLayer()->isOnLayer(geo_ctx,global_pos, bcheck)
@@ -868,13 +921,13 @@ namespace {
                       << " : " << sqrt(sqr(center_pos[0])+sqr(center_pos[1])) << ",  " << center_pos[2]
                       << " -> " << sqrt(sqr(on_surface[0])+sqr(on_surface[1])) << ",  " << on_surface[2]
                       << " | " << sqrt(distance2) << " [ " << result.value()[0]  << ", "  << result.value()[1] << " ] "
-                      << (inside_bounds ? " (in-side bounds)" : "")
+                      << (tol_i>0 ? " (in-side bounds) " : " ") << (tol_i) << " "
                       << (on_layer ? " (on layer)" : (a_surface->associatedLayer()
                                                       ? ( on_layer2 ? "(~on layer)" : "")
                                                       : "(NO LAYER)")) << std::endl
-                      << "  " << a_surface->bounds()
+               //                      << "  " << a_surface->bounds()
                       << std::endl;
-            if (!on_layer && inside_bounds && a_surface->associatedLayer()) {
+            if (!on_layer && tol_i>0 && a_surface->associatedLayer()) {
                const Acts::Layer *a_layer = a_surface->associatedLayer();
                Acts::Result<Acts::Vector2> result2 = a_layer->surfaceRepresentation().globalToLocal(geo_ctx,
                                                                               global_pos,
@@ -986,6 +1039,26 @@ namespace {
       }
    }
 
+   static std::string cornersToStr(const Acts::Surface *a_surface,
+                                   const Acts::GeometryContext &geo_ctx) {
+      std::stringstream out;
+      const Acts::AnnulusBounds * annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &a_surface->bounds() );
+      if (annulus_bounds) {
+         Acts::Vector3 dummy_momentum{1.,1.,1.};
+         std::vector<Acts::Vector2> corners = annulus_bounds->corners();
+         unsigned int corner_i=0;
+         for (const Acts::Vector2 &a_corner  : corners) {
+            Acts::Vector3 glob = a_surface->localToGlobal(geo_ctx,
+                                                          a_corner,
+                                                          dummy_momentum);
+            out << " DEBUG surfaceBound corners " << a_surface->geometryId().value() << " "
+                << corner_i << " : " << glob[0] << " , " << glob[1] << " , " << glob[2] << std::endl;
+            ++corner_i;
+         }
+      }
+      return out.str();
+   }
+
    template <typename visitor_t>
    void visitLayerSurfaces(const Acts::TrackingVolume *volume,
                            const Acts::GeometryContext&geo_ctx,
@@ -1011,6 +1084,49 @@ namespace {
       }
    }
 
+   static void testSurface(const ActsExamples::AlgorithmContext& ctx,
+                           const Acts::Surface *surface, const Acts::Vector3 &global_pos, double max_error) {
+      Acts::BoundaryCheck bcheck(true,true, 1e-2,1e-2);
+      Acts::Vector3 dummy_momentum{};
+      Acts::Result<Acts::Vector2> result = surface->globalToLocal(ctx.geoContext,
+                                                                  global_pos,
+                                                                  dummy_momentum,
+                                                                  max_error);
+      if (result .ok()) {
+         //    //                            << " trans " <<surface->transform(ctx.geoContext)
+         //           << std::endl;
+         const auto &trans = surface->transform(ctx.geoContext);
+                  //                  Acts::BoundaryCheck bcheck(true,true, 1e-1,1e-1);
+         bool inside_bounds = surface->bounds().inside(result.value(), bcheck);
+
+         // if (!inside_bounds ) {
+         //    const Acts::AnnulusBounds * annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &surface->bounds() );
+         //    if (annulus_bounds) {
+         //       std::vector<Acts::Vector2> corners = annulus_bounds->corners();
+         //       bool alt_inside_bounds = altBoundsCheck(detector_element_id, result.value(),corners);
+         //       if (alt_inside_bounds != inside_bounds) {
+         //          std::cout << "DEBUG bounds check disagree " << inside_bounds << " != " << alt_inside_bounds << std::endl;
+         //       }
+         //    }
+         // }
+         double distance2=-1.;
+         if (inside_bounds) {
+            Acts::Vector3 on_surface = surface->localToGlobal(ctx.geoContext,
+                                                              result.value(),
+                                                              dummy_momentum);
+            double distance2 = (global_pos - on_surface).squaredNorm();
+            double distance=sqrt(distance2);
+            // std::cout << "DEBUG " << global_pos << " -> " << result.value() 
+            //           << " id " <<  ( surface->associatedLayer() ? surface->associatedLayer()->geometryId() : 0u)
+            //           << " distance = " << sqrt(distance2)
+            //           << std::endl;
+            // if (distance2<min_distance2) {
+            //    min_distance2 = distance2;
+            //    min_surface = surface;
+            // }
+         }
+      }
+   }
 
    std::pair<Acts::GeometryIdentifier,bool> findGeoId(const ActsExamples::AlgorithmContext& ctx,
                                                       const Acts::TrackingGeometry &trackingGeometry,
@@ -1019,7 +1135,7 @@ namespace {
                                                       const Acts::Vector3 &global_pos,
                                                       const double &max_error,
                                                       bool dump_surface=false,
-                                                      bool debug=true) {
+                                                      bool debug=false) {
 
       std::pair<Acts::GeometryIdentifier,bool> ret{};
       //std::regex ignore(".*HGTD.*");
@@ -1041,12 +1157,13 @@ namespace {
             const Acts::Surface* min_surface=nullptr;
 
             //            final_volume->visitSurfaces()
-            Acts::BoundaryCheck bcheck(true,true, 1e-1,1e-1);
+            Acts::BoundaryCheck bcheck(true,true, 1e-2,1e-2);
             visitLayerSurfaces(final_volume,
                                ctx.geoContext,
                                global_pos,
                                bcheck,
                                [&ctx,
+                                &bcheck,
                                 &max_error,
                                 &global_pos,
                                 &min_distance2,
@@ -1055,23 +1172,21 @@ namespace {
                   // if (surface->associatedLayer()
                   //     && surface->associatedLayer()->trackingVolume()
                   //     && std::regex_match(surface->associatedLayer()->trackingVolume()->volumeName(), ignore)) return;
+                                  uint64_t sur_geo_id = surface->geometryId().value();
+                                  bool dump = (detector_element_id == 576815344803381248); //(sur_geo_id == 1441152705392670976 || sur_geo_id == 1441152705392672512);
                Acts::Vector3 dummy_momentum{};
                Acts::Result<Acts::Vector2> result = surface->globalToLocal(ctx.geoContext,
                                                                            global_pos,
                                                                            dummy_momentum,
                                                                            max_error);
                if (result .ok()) {
-                  // std::cout << "DEBUG " << global_pos << " -> " << result.value() 
-                  //           << " id " <<  ( surface->associatedLayer() ? surface->associatedLayer()->geometryId() : 0u)
-                  //           << std::endl;
-                  // std::cout << "DEBUG " << global_pos << " -> " << result.value() 
-                  //           << " id " <<  ( surface->associatedLayer() ? surface->associatedLayer()->geometryId() : 0u)
-                  //           << " det " << static_cast<const void *>(surface->associatedDetectorElement())
                   //    //                            << " trans " <<surface->transform(ctx.geoContext)
                   //           << std::endl;
                   const auto &trans = surface->transform(ctx.geoContext);
-                  Acts::BoundaryCheck bcheck(true,true, 1e-1,1e-1);
+                  //                  Acts::BoundaryCheck bcheck(true,true, 1e-1,1e-1);
                   bool inside_bounds = surface->bounds().inside(result.value(), bcheck);
+
+
                   // if (!inside_bounds ) {
                   //    const Acts::AnnulusBounds * annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &surface->bounds() );
                   //    if (annulus_bounds) {
@@ -1082,11 +1197,12 @@ namespace {
                   //       }
                   //    }
                   // }
+                  double distance2=-1.;
                   if (inside_bounds) {
                      Acts::Vector3 on_surface = surface->localToGlobal(ctx.geoContext,
                                                                        result.value(),
                                                                        dummy_momentum);
-                     double distance2 = (global_pos - on_surface).squaredNorm();
+                     distance2 = (global_pos - on_surface).squaredNorm();
                      // std::cout << "DEBUG " << global_pos << " -> " << result.value() 
                      //           << " id " <<  ( surface->associatedLayer() ? surface->associatedLayer()->geometryId() : 0u)
                      //           << " distance = " << sqrt(distance2)
@@ -1097,13 +1213,28 @@ namespace {
                      }
 
                   }
+
+                  if (dump) {
+                     std::cout << "DEBUG " << global_pos[0] << " , " << global_pos[1] << ", " << global_pos[2]
+                               << " -> " << result.value()[0]  << ", " << result.value()[1]
+                               << " det " << detector_element_id
+                               << " geoId " <<  sur_geo_id 
+                               << " " << distance2
+                               << (inside_bounds ? " inside " : "")
+                               << " " << (min_surface ? min_surface->geometryId().value() : 0u)
+                               << std::endl;
+                     // std::cout << "DEBUG " << global_pos << " -> " << result.value() 
+                     //           << " id " <<  sur_geo_id
+                     //           << " det " << static_cast<const void *>(surface->associatedDetectorElement())
+                  }
+
                }
             });
             if (min_surface) {
                const Acts::Layer* layer = min_surface->associatedLayer();
                if (dump_surface) {
                      std::cout << "DEBUG surface for detector element " << detector_element_id << " mapped to "
-                               << layer->geometryId();
+                               << min_surface->geometryId();
                      min_surface->toStream(ctx.geoContext, std::cout);
                      std::cout << std::endl;
                      const Acts::AnnulusBounds * annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &min_surface->bounds() );
@@ -1137,7 +1268,7 @@ namespace {
                      }
 
                      std::cout << "WARNING large matching distance for detector element " << detector_element_id << " mapped to "
-                               << layer->geometryId()
+                               << min_surface->geometryId()
                                << " pos: "
                                << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2]
                                << " -> "
@@ -1164,45 +1295,82 @@ namespace {
                   match_distance_range[detector_element_id].update( sqrt(min_distance2) );
                   log_distance.add( min_distance2>0 ? log( sqrt(min_distance2) ) / log(10.) : -308 );
                   if (geomap_iter != geo_map.end()) {
-                     if (layer->geometryId() == geomap_iter->second) return std::make_pair(geomap_iter->second,
+
+                     uint64_t sur_geo_id = min_surface->geometryId().value();
+                     bool dump = detector_element_id == 576815344803381248; // (sur_geo_id == 1441152705392670976 || sur_geo_id == 1441152705392672512);
+                     if (dump) {
+                        std::cout << "DEBUG detector element " << detector_element_id << " mapped to "
+                                  << geomap_iter->second.value() << " " << geomap_iter->second
+                                  << " distance=" << sqrt(min_distance2)
+                                  << " pos " << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2]
+                                  << std::endl;
+                     }
+
+                     if (min_surface->geometryId() == geomap_iter->second) return std::make_pair(geomap_iter->second,
                                                                                            sqrt(min_distance2) < 1e-3);
                      std::cout << "ERROR Geometry element for " << detector_element_id  <<  " and pos: "
                                << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2] << " ."
-                               << layer->geometryId()
+                               << min_surface->geometryId()
                                << " Previously detector element " << detector_element_id
                                << " was matched to " << geomap_iter->second
                                << std::endl;
+
+                     auto surface = trackingGeometry.findSurface(geomap_iter->second);
+                     if (surface) {
+                        std::cout << "DEBUG old surface " << surface->geometryId().value() << " "
+                                  << surface->geometryId() << " surface " << static_cast<const void *>(surface)
+                                  << " " << std::tuple<const Acts::Surface&,
+                                                       const Acts::GeometryContext&>(*surface,ctx.geoContext)
+                                  << cornersToStr(surface, ctx.geoContext)
+                                  << std::endl;
+                     }
+                     std::cout << "DEBUG new surface " << min_surface->geometryId().value() << " "
+                               << min_surface->geometryId() << " surface " <<  static_cast<const void *>(min_surface)
+                               << " " << std::tuple<const Acts::Surface&,
+                                                    const Acts::GeometryContext&>(*min_surface,ctx.geoContext)
+                               << cornersToStr(min_surface, ctx.geoContext)
+                               << std::endl;
+                     if (dump) {
+                           dumpVolumeInfo(final_volume, ctx.geoContext, global_pos, std::numeric_limits<double>::max());
+                     }
+
                   }
                   else {
 
                   std::pair<std::unordered_map<unsigned long, Acts::GeometryIdentifier>::const_iterator, bool>
-                     insert_result = geo_map.insert( std::make_pair(detector_element_id, layer->geometryId()));
+                     insert_result = geo_map.insert( std::make_pair(detector_element_id, min_surface->geometryId()));
                   if (insert_result.second) {
                      m_destinationMultiplicity[insert_result.first->second].updateBox(global_pos);
                      if (debug) {
                         std::cout << "DEBUG detector element " << detector_element_id << " mapped to "
-                                  << insert_result.first->second << " distance=" << sqrt(min_distance2)
+                                  << insert_result.first->second.value() << " " << insert_result.first->second
+                                  << " distance=" << sqrt(min_distance2)
                                   << " pos " << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2]
                                   << std::endl;
+                        if (min_surface->geometryId().value() == 576460889742376960) {
+                           dumpVolumeInfo(final_volume, ctx.geoContext, global_pos, std::numeric_limits<double>::max());
+                        }
+
                      }
                      return std::make_pair(insert_result.first->second,
                                            sqrt(min_distance2) < 1e-3);
                   }
                   else {
                      std::cout << "WARNING detector element " << detector_element_id << " is already mapped to "
-                               << insert_result.first->second << " new: " << layer->geometryId() << std::endl;
-                     return std::make_pair(layer->geometryId(),
+                               << insert_result.first->second << " new: " << min_surface->geometryId() << std::endl;
+                     return std::make_pair(min_surface->geometryId(),
                                            sqrt(min_distance2) < 1e-3);
                   }
                   }
                }
                else {
                   if (geomap_iter != geo_map.end()) {
-                     std::cout << "ERROR No matching geometry element found for " << detector_element_id  <<  " pos: "
+                     std::cout << "ERROR No associated layer for matching geometry element input:" << detector_element_id  <<  " pos: "
                                << global_pos[0] << ", " << global_pos[1] << ", " << global_pos[2] << " ."
                                << " Although detector element " << detector_element_id
                                << " was matched to " << geomap_iter->second
                                << std::endl;
+                     dumpVolumeInfo(final_volume, ctx.geoContext, global_pos, std::numeric_limits<double>::max());
                   }
                }
 
@@ -1241,6 +1409,36 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
   //  IndexMultimap<Index> measurementSimHitsMap;
   std::regex ignore(".*HGTD.*");
 
+  const Acts::TrackingGeometry *tg=m_cfg.trackingGeometry.get();
+  m_cfg.trackingGeometry->visitSurfaces([&geo_map,&ctx, tg](const Acts::Surface* surface) {
+        if (surface && surface->associatedDetectorElement()) {
+           const Test::IdentifiableDetectorElement *
+              det_element=dynamic_cast<const Test::IdentifiableDetectorElement *>(surface->associatedDetectorElement());
+           if (det_element) {
+              std::pair<std::unordered_map<unsigned long, Acts::GeometryIdentifier>::iterator, bool>
+                 insert_result =  geo_map.insert( std::make_pair( det_element->detectorId(), surface->geometryId()) );
+              if (!insert_result.second) {
+                 const Acts::Surface *old_surf = tg->findSurface(insert_result.first->second);
+                 std::cout << "ERROR failed to insert ID mapping " << det_element->detectorId() << " -> " << surface->geometryId().value()
+                           << " previously mapped to " << insert_result.first->second << std::endl
+                           << " old : " << old_surf->geometryId().value() << " : "
+                           << std::tuple<const Acts::Surface&,
+                                         const Acts::GeometryContext&>(*old_surf,ctx.geoContext)
+                           << " new : "<< surface->geometryId().value() << " : "
+                           << std::tuple<const Acts::Surface&,
+                                         const Acts::GeometryContext&>(*surface,ctx.geoContext)
+                           <<std::endl;
+              }
+           }
+           else {
+              std::cout << "ERROR unsupported detector element " << typeid(*surface->associatedDetectorElement()).name()
+                        << std::endl;
+           }
+
+        }
+      });
+  std::cout << "DEBUG RootDigiReader::convertMeasurements geo_map size from tg : " <<  geo_map.size() << std::endl;
+
   // m_cfg.trackingGeometry->visitSurfaces([&ctx, &ignore](const Acts::Surface* surface) {
   //       std::cout  << "DEBUG visit surfaces id " <<  ( surface->associatedLayer() ? surface->associatedLayer()->geometryId() : 0u)
   //                  << " "
@@ -1262,6 +1460,7 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
 
   //    });
 
+  if (false)  {
   for (const std::pair<const uint64_t, std::array<double,3 > > &elm : m_surfaceCenters) {
      std::cout <<"Find geoID for surface " << elm.first << " : " << elm.second[0] << ", " << elm.second[1] << ", " << elm.second[2]
                << std::endl;
@@ -1272,9 +1471,22 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
                                                                      elm.first,
                                                                      Acts::Vector3(elm.second[0],elm.second[1],elm.second[2]),
                                                                      1e-3,
-                                                                     true);
+                                                                     false);
+  }
   }
 
+  // {
+  //    std::array<Acts::Vector3, 2>  pos {
+  //          Acts::Vector3{642.409302, 126.368721, -1522.74902},
+  //          Acts::Vector3{642.409302, 126.368721, -1522.74902},
+  //          };
+  //    std::array<uint64_t,2> geo_ids {1441152705392445696, 1441152705392443648 };
+  //    for(const Acts::Vector3 &a_pos : pos) {
+  //       for (uint64_t geo_id : geo_ids) {
+  //          testSurface(ctx, m_cfg.trackingGeometry->findSurface(geo_id), a_pos, 1e-2);
+  //       }
+  //    }
+  // }
 
   unsigned int container_i=0;
   for (const ClusterContainer &cluster_container : m_clusters ) {
@@ -1296,6 +1508,29 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
                                                     std::max(cluster_container.localXError->at(meas_i),
                                                              cluster_container.localYError->at(meas_i)));
         Acts::GeometryIdentifier geoId = ret.first;
+        if (geoId.value() == 576460889742376960) {
+           auto surface = m_cfg.trackingGeometry->findSurface(geoId);
+           if (surface) {
+              std::cout << "DEBUG search surface matching " << geoId.value() << " " << geoId << " surface " << surface->geometryId().value()
+                        <<  surface->geometryId() << " " << std::tuple<const Acts::Surface&,
+                                                                       const Acts::GeometryContext&>(*surface,ctx.geoContext)
+                        << std::endl;
+           }
+           else {
+              std::cout << "DEBUG search surface matching " << geoId.value() << " " << geoId << " NO surface." << std::endl;
+           }
+        }
+
+        if (!m_cfg.trackingGeometry->findSurface(geoId)) {
+           std::stringstream msg;
+           msg << "ERROR invalid geoID for "
+               << cluster_container.globalX->at(meas_i)
+               << cluster_container.globalY->at(meas_i)
+               << cluster_container.globalZ->at(meas_i)
+               << " det=" << cluster_container.detectorElementID->at(meas_i)
+               << " -> " << geoId.value() << " " << geoId;
+           std::runtime_error(msg.str());
+        }
         fillValidationHists(Acts::Vector3(cluster_container.globalX->at(meas_i),
                                           cluster_container.globalY->at(meas_i),
                                           cluster_container.globalZ->at(meas_i)),
@@ -1331,12 +1566,34 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
         for ( const std::vector<int>  &sim_hit_list : sdo_info.sim_depositsBarcode->at(meas_i) ) {
            unsigned int idx1=0;
            for ( const int  &sim_barcode : sim_hit_list ) {
+              bool has_barcode=false;
               try {
-                 measurementParticlesMap.emplace_hint(measurementParticlesMap.end(),
-                                                      measurementIdx,
-                                                      findParticleBarCode(barcode_map, sim_barcode));
+                 ActsFatras::Barcode particle_id = findParticleBarCode(barcode_map, sim_barcode);
+                 std::pair<HitParticlesMap::const_iterator, HitParticlesMap::const_iterator>
+                    particle_range = measurementParticlesMap.equal_range(meas_i);
+                 for (auto hitParticle : makeRange(particle_range)) {
+                    if (hitParticle.second == particle_id) {
+                       has_barcode = true;
+                       break;
+                    }
+                 }
+                 if (!has_barcode) {
+                    measurementParticlesMap.emplace_hint( (particle_range.first == particle_range.second
+                                                           ? measurementParticlesMap.end()
+                                                           : particle_range.second),
+                                                         measurementIdx,
+                                                         particle_id);
+                 }
+              }
+              catch (std::runtime_error &err) {
+                 std::cout << "DEBUG missing target barcode for " << measurementIdx << " source=" << sim_barcode
+                           << " : " << err.what()
+                           << std::endl;
+              }
+
+              {
                  if (idx0<sim_hit_energy_list.size() && idx1<sim_hit_energy_list[idx0].size()) {
-                    if (sim_barcode>0 && sim_barcode<std::numeric_limits<int>::max()-1) {
+                    if (has_barcode &&  sim_barcode>0 && sim_barcode<std::numeric_limits<int>::max()-1) {
                        ++n_contributions_validBarcode;
                        energy_validBarcode += sim_hit_energy_list[idx0][idx1];
                     }
@@ -1350,11 +1607,6 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
                               << idx0 << ", " << idx1
                               << std::endl;
                  }
-              }
-              catch (std::runtime_error &err) {
-                 std::cout << "DEBUG missing target barcode for " << measurementIdx << " source=" << sim_barcode
-                           << " : " << err.what()
-                           << std::endl;
               }
               ++idx1;
            }
@@ -1390,6 +1642,12 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
      ++container_i;
   }
   checkDestinationMultiplicity();
+
+  if (m_cfg.stop) {
+     std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
+     kill(getpid(), SIGSTOP);
+  }
+
 
   ctx.eventStore.add(m_cfg.sourceLinks, std::move(sourceLinks));
   ctx.eventStore.add(m_cfg.sourceLinks + "__storage",
