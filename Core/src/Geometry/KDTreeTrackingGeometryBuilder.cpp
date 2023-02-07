@@ -30,7 +30,7 @@ Acts::KDTreeTrackingGeometryBuilder::KDTreeTrackingGeometryBuilder(
 
 std::unique_ptr<const Acts::TrackingGeometry>
 Acts::KDTreeTrackingGeometryBuilder::trackingGeometry(
-    const GeometryContext& gctx) const {
+  const GeometryContext& gctx) const {
   using MeasuredSurface =
       std::pair<std::array<ActsScalar, 2u>, std::shared_ptr<Surface>>;
   // Prepare all the surfaces
@@ -104,6 +104,22 @@ Acts::KDTreeTrackingGeometryBuilder::translateVolume(
       }
       auto tVolume = m_cfg.trackingVolumeHelper->createContainerTrackingVolume(
           gctx, translatedVolumes);
+      if (tVolume) {
+         tVolume->visitSurfaces([&gctx, tVolume](const Acts::Surface* surface) {
+               if (surface) {
+                  uint64_t geo_id = surface->geometryId().value();
+                  if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
+                     std::cout <<  "KDTree " << tVolume->volumeName() << geo_id
+                               << std::endl
+                               << " Surface " << geo_id<< " " << static_cast<const void *>(surface)
+                               << std::tuple<const Acts::Surface&,
+                                             const Acts::GeometryContext&>(*surface,gctx)
+                                                                             << std::endl;
+                  }
+               }
+            });
+      }
+
       ACTS_DEBUG(indent << "> translated into container volume bounds: "
                         << tVolume->volumeBounds());
       return tVolume;
@@ -127,6 +143,19 @@ Acts::KDTreeTrackingGeometryBuilder::translateVolume(
           rangeZ.max(), ptVolume.name);
       ACTS_DEBUG(indent << "> translated into bounds: "
                         << tVolume->volumeBounds());
+      if (tVolume) {
+         tVolume->visitSurfaces([&gctx](const Acts::Surface* surface) {
+               if (surface) {
+                  uint64_t geo_id = surface->geometryId().value();
+                  if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
+                     std::cout <<  "KDTree (3) Surface " << geo_id<< " " << static_cast<const void *>(surface)
+                               << std::tuple<const Acts::Surface&,
+                                             const Acts::GeometryContext&>(*surface,gctx)
+                                                                             << std::endl;
+                  }
+               }
+            });
+      }
       return tVolume;
     }
   }
@@ -197,6 +226,15 @@ Acts::KDTreeTrackingGeometryBuilder::translateLayer(
     for (const auto& s : layerSurfaces) {
       cLayerSurfaces.push_back(s.second);
     }
+    for (const std::shared_ptr<const Surface> & a_surface :  cLayerSurfaces) {
+       uint64_t geo_id = a_surface->geometryId().value();
+       if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
+          std::cout <<  "KDTree Surface " << geo_id<< " " << static_cast<const void *>(a_surface.get())
+                    << std::tuple<const Acts::Surface&,
+                                  const Acts::GeometryContext&>(*a_surface,gctx)
+                    << std::endl;
+       }
+    }
 
     Acts::BinningType bType0 = Acts::equidistant;
     Acts::BinningType bType1 = Acts::equidistant;
@@ -251,6 +289,21 @@ Acts::KDTreeTrackingGeometryBuilder::translateLayer(
   } else {
     throw std::runtime_error(
         "KDTreeTrackingGeometryBuilder: layer was not built.");
+  }
+
+  if (tLayer && tLayer->surfaceArray())
+  {
+     const auto &d_layer_surfaces = tLayer->surfaceArray()->surfaces();
+
+     for (auto& surface : d_layer_surfaces) {
+        uint64_t geo_id = surface->geometryId().value();
+        if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
+           std::cout <<  "KDTree (2) Surface " << geo_id<< " " << static_cast<const void *>(surface)
+                     << std::tuple<const Acts::Surface&,
+                                   const Acts::GeometryContext&>(*surface,gctx)
+                                                                   << std::endl;
+        }
+     }
   }
 
   return tLayer;

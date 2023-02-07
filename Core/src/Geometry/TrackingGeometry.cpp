@@ -24,12 +24,38 @@ Acts::TrackingGeometry::TrackingGeometry(
   highestVolume->closeGeometry(materialDecorator, m_volumesById, volumeID, hook,
                                logger);
   m_volumesById.rehash(0);
+
+  Acts::GeometryContext geo_ctx;
+
   // fill surface lookup container
-  m_world->visitSurfaces([this](const Acts::Surface* srf) {
+  m_world->visitSurfaces([this, &geo_ctx](const Acts::Surface* srf) {
     if (srf != nullptr) {
       m_surfacesById[srf->geometryId()] = srf;
+      const Acts::Surface* surface=srf;
+      uint64_t geo_id = surface->geometryId().value();
+      if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
+         std::cout <<  "TG (2)" 
+                   << " Surface " << geo_id<< " " << static_cast<const void *>(surface)
+                   << std::tuple<const Acts::Surface&,
+                                 const Acts::GeometryContext&>(*surface,geo_ctx)
+                                                                 << std::endl;
+      }
     }
   });
+
+   std::array<uint64_t,2> geo_ids{1441152705392644352,1441152705392645120};
+   for (uint64_t geo_id : geo_ids) {
+      auto surface_iter = m_surfacesById.find(geo_id);
+      if (surface_iter != m_surfacesById.end()) {
+         auto surface = surface_iter->second;
+         std::cout << "DEBUG TG surface " << surface->geometryId().value() << " "
+                   << surface->geometryId() << " surface " << static_cast<const void *>(surface)
+                   << " " << std::tuple<const Acts::Surface&,
+                                        const Acts::GeometryContext&>(*surface,geo_ctx)
+                   << std::endl;
+      }
+   }
+
   m_surfacesById.rehash(0);
 }
 

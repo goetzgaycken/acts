@@ -88,9 +88,19 @@ void Acts::Layer::closeGeometry(const IMaterialDecorator* materialDecorator,
     GeometryIdentifier::Value issurface = 0;
     for (auto& sSurface : m_surfaceArray->surfaces()) {
       auto ssurfaceID = GeometryIdentifier(layerID).setSensitive(++issurface);
+      uint64_t orig_geoID=sSurface->geometryId().value();
       ssurfaceID = hook.decorateIdentifier(ssurfaceID, *sSurface);
       auto mutableSSurface = const_cast<Surface*>(sSurface);
       mutableSSurface->assignGeometryId(ssurfaceID);
+      if (ssurfaceID == 1441152705392644352 || ssurfaceID == 1441152705392645120
+          || orig_geoID == 1441152705392644352 ||  orig_geoID == 1441152705392645120) {
+         std::cout << layerID << " change surface ID "
+                   << orig_geoID <<  " -> "
+                   << ssurfaceID << " " << ssurfaceID.value()
+                   << " " << static_cast<const void *>(mutableSSurface)
+                   << std::endl;
+      }
+
       if (materialDecorator != nullptr) {
         materialDecorator->decorate(*mutableSSurface);
       }

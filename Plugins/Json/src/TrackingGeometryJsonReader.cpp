@@ -1035,6 +1035,35 @@ TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& trackin
       kdtTrackingGeometryBuilder.trackingGeometry(tContext).release());
    dumpTrackingGeometry( tmp.get() );
 
+   std::array<uint64_t,2> geo_ids{1441152705392644352,1441152705392645120};
+   for (uint64_t geo_id : geo_ids) {
+      auto surface = tmp->findSurface(geo_id);
+      if (surface) {
+         std::cout << "DEBUG TG surface " << surface->geometryId().value() << " "
+                   << surface->geometryId() << " surface " << static_cast<const void *>(surface)
+                   << " " << std::tuple<const Acts::Surface&,
+                                        const Acts::GeometryContext&>(*surface,tContext)
+                   << std::endl;
+      }
+   }
+   const auto tVolume = tmp->highestTrackingVolume();
+      if (tVolume) {
+         tVolume->visitSurfaces([&tContext, tVolume](const Acts::Surface* surface) {
+               if (surface) {
+                  uint64_t geo_id = surface->geometryId().value();
+                  if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
+                     std::cout <<  "KDTree " << tVolume->volumeName() << geo_id
+                               << std::endl
+                               << " Surface " << geo_id<< " " << static_cast<const void *>(surface)
+                               << std::tuple<const Acts::Surface&,
+                                             const Acts::GeometryContext&>(*surface,tContext)
+                                                                             << std::endl;
+                  }
+               }
+            });
+      }
+
+
    if (! m_cfg.geantinoInputFileName.empty()) {
       std::map<uint64_t,uint64_t> id_map = GeantinoReader::createIdRemap(m_cfg.geantinoInputFileName, *tmp,
                                                                          static_cast<Long64_t>(m_cfg.maxGeantinoEntries) );

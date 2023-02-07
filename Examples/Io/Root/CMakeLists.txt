@@ -1,4 +1,4 @@
-# add_definitions(-g -O0)
+# add_definitions(-g -O2)
 add_library(
   ActsExamplesIoRoot SHARED
   src/RootMeasurementWriter.cpp
