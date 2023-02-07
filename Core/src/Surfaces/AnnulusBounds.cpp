@@ -141,8 +141,8 @@ bool Acts::AnnulusBounds::inside(const Vector2& lposition, double tolR,
   double phiLoc = locpo_rotated[eBoundLoc1];
   double rLoc = locpo_rotated[eBoundLoc0];
 
-  if (phiLoc < (get(eMinPhiRel) - tolPhi) ||
-      phiLoc > (get(eMaxPhiRel) + tolPhi)) {
+  if (phiLoc*rLoc < (get(eMinPhiRel)*rLoc - tolPhi) ||
+      phiLoc*rLoc > (get(eMaxPhiRel)*rLoc + tolPhi)) {
     return false;
   }
 
