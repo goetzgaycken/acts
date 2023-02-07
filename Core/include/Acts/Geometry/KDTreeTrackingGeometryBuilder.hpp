@@ -24,6 +24,9 @@ class Layer;
 class LayerCreator;
 class Surface;
 
+   using TrackingGeometryCreator = std::function< std::unique_ptr<const TrackingGeometry>(
+   const MutableTrackingVolumePtr& highestVolume,
+   const IMaterialDecorator* materialDecorator) >;
 /// A Tracking Geometry builder restricted to cylindrical geometries
 ///
 /// It takes some helper tools and a vector of surface objects,
@@ -50,6 +53,11 @@ class KDTreeTrackingGeometryBuilder : public ITrackingGeometryBuilder {
     GeometryIdentifierHook geometryIdentifierHook;
     /// For screen output
     std::string hierarchyIndent = "  ";
+
+    TrackingGeometryCreator creator=[](const MutableTrackingVolumePtr& a_highestVolume,
+                                       const IMaterialDecorator* a_materialDecorator) {
+       return std::make_unique<const TrackingGeometry>(a_highestVolume,a_materialDecorator);
+    };
   };
 
   using SurfaceKDT =
@@ -72,8 +80,7 @@ class KDTreeTrackingGeometryBuilder : public ITrackingGeometryBuilder {
   /// @param gctx geometry context of that building call
   ///
   /// @return a unique pointer to a TrackingGeometry
-  std::unique_ptr<const TrackingGeometry> trackingGeometry(
-      const GeometryContext& gctx) const final;
+  std::unique_ptr<const TrackingGeometry> trackingGeometry(const GeometryContext& gctx) const final;
 
  private:
   /// Configuration member

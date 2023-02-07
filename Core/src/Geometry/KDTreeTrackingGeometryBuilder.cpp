@@ -58,8 +58,8 @@ Acts::KDTreeTrackingGeometryBuilder::trackingGeometry(
                          << " surfaces from the KDTree.");
 
   // return the geometry to the service
-  return std::make_unique<const Acts::TrackingGeometry>(worldTrackingVolume,
-                                                        m_cfg.materialDecorator.get());
+  return m_cfg.creator(worldTrackingVolume,
+                       m_cfg.materialDecorator.get());
 }
 
 std::shared_ptr<Acts::TrackingVolume>

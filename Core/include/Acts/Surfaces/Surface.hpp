@@ -221,6 +221,16 @@ class Surface : public virtual GeometryObject,
   /// @return plain pointer to the DetectorElement, can be nullptr
   const DetectorElementBase* associatedDetectorElement() const;
 
+  /// Associate a detector element to this surface.
+  ///
+  /// Associate a detector element with the this surface. The ownership
+  /// over the detector element stays with the caller who must ensure that
+  /// this surface does no outlive the detector element.
+  /// @param detector_element pointer to a valid detector element or nullptr
+  void associateDetectorElement(const DetectorElementBase *detector_element) {
+    m_associatedDetElement = detector_element;
+  }
+
   /// Return method for the associated Layer in which the surface is embedded
   /// @return Layer by plain pointer, can be nullptr
   const Layer* associatedLayer() const;
@@ -518,5 +528,7 @@ inline std::ostream& operator<<(
   surface.toStream(gctx, os);
   return os;
 }
+
+
 
 }  // namespace Acts

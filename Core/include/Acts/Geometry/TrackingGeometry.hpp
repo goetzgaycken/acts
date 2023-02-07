@@ -54,7 +54,7 @@ class TrackingGeometry {
                    const Logger& logger = getDummyLogger());
 
   /// Destructor
-  ~TrackingGeometry();
+  virtual ~TrackingGeometry();
 
   /// Access to the world volume
   /// @return plain pointer to the world volume
