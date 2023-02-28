@@ -107,6 +107,7 @@ ActsExamples::ProcessCode ActsExamples::SpacePointMaker::execute(
   Acts::SpacePointBuilderOptions spOpt;
   SimSpacePointContainer spacePoints;
   for (Acts::GeometryIdentifier geoId : m_cfg.geometrySelection) {
+     std::cout << "DEBUG geometry selection: " << geoId << std::endl;
     // select volume/layer depending on what is set in the geometry id
     auto range = selectLowestNonZeroGeometryObject(sourceLinks, geoId);
     // groupByModule only works with geometry containers, not with an
@@ -114,6 +115,7 @@ ActsExamples::ProcessCode ActsExamples::SpacePointMaker::execute(
     auto groupedByModule = makeGroupBy(range, detail::GeometryIdGetter());
 
     for (auto [moduleGeoId, moduleSourceLinks] : groupedByModule) {
+       std::cout << "DEBUG geometry selection: " << geoId << " -> elements " << moduleSourceLinks.size() << std::endl;
       for (auto& sourceLink : moduleSourceLinks) {
         const auto& meas = measurements[sourceLink.index()];
 

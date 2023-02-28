@@ -16,6 +16,8 @@
 #include "ActsExamples/EventData/SimSpacePoint.hpp"
 #include "ActsExamples/Framework/BareAlgorithm.hpp"
 
+#include "Acts/Geometry/TrackingGeometry.hpp"
+
 #include <string>
 #include <vector>
 
@@ -52,6 +54,10 @@ class SeedingAlgorithm final : public BareAlgorithm {
     // number of phiBin neighbors at each side of the current bin that will be
     // used to search for SPs
     int numPhiNeighbors = 0;
+
+    /// the tracking geometry necessary to match measurements to surfaces and/or perform local to global transformations
+    std::shared_ptr<const Acts::TrackingGeometry> trackingGeometry;
+    bool stop=false;
   };
 
   /// Construct the seeding algorithm.

@@ -218,7 +218,7 @@ void addTrackFinding(Context& ctx) {
       ActsExamples::SeedingAlgorithm, mex, "SeedingAlgorithm", inputSpacePoints,
       outputSeeds, outputProtoTracks, seedFilterConfig, seedFinderConfig,
       seedFinderOptions, gridConfig, gridOptions, allowSeparateRMax,
-      zBinNeighborsTop, zBinNeighborsBottom, numPhiNeighbors);
+      zBinNeighborsTop, zBinNeighborsBottom, numPhiNeighbors, trackingGeometry, stop);
 
   ACTS_PYTHON_DECLARE_ALGORITHM(
       ActsExamples::SeedingOrthogonalAlgorithm, mex,
