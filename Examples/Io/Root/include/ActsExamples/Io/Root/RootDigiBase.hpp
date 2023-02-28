@@ -19,6 +19,7 @@
 #include <string>
 #include <cmath>
 #include <vector>
+#include <sstream>
 #include <type_traits>
 
 class TFile;
@@ -86,6 +87,8 @@ class RootDigiBase {
 
     /// send stop signal to precess upon construction to allow attaching a debugger
     bool stop = false;
+
+    bool singleParticle = false;
   };
   RootDigiBase() = default;
   /// Construct the particle writer.
@@ -118,7 +121,6 @@ class RootDigiBase {
   ///
   /// @param[in] ctx is the algorithm context
   /// @param[in] particles are the particle to be written
-
    
   ConfigBase m_cfg;
   std::unique_ptr<const Acts::Logger> m_logger;
@@ -127,6 +129,12 @@ class RootDigiBase {
   TFile* m_file = nullptr;
   TTree* m_tree = nullptr;
   std::vector<TBranch *> m_activeBranches;
+
+  int m_nextEntry=0;
+  int m_currentParticle=0;
+  uint64_t m_entryOffset =0;
+  std::vector<std::pair<float, unsigned int> > m_stableParticles;
+
   /// Event identifier.
   struct EventInfo {
      //     UInt_t          runNumber;
@@ -169,8 +177,11 @@ class RootDigiBase {
      Stat *m_stat;
   };
    static void checkDimensions( std::size_t a, std::size_t b, std::size_t max_dim= std::numeric_limits<std::size_t>::max()) {
-      if (a != b || b>=max_dim) {
-         throw std::runtime_error("Branch dimension mismatch");
+      if (a != b || b>max_dim) {
+         std::stringstream msg;
+         msg << "Branch dimension mismatch : " << a << " != " << b << " || " << b << " > " << max_dim;
+
+         throw std::runtime_error(msg.str());
       }
    }
    static void checkPointer(const void *ptr) {
@@ -179,7 +190,7 @@ class RootDigiBase {
       }
    }
   struct ParticleContainer {
-     static constexpr unsigned int kNParticlesMax = 15000;
+     static constexpr unsigned int kNParticlesMax = 1426423;
      std::vector<int>     pdgId;
      std::vector<int>     barcode; // @TODO should be uint64 (schema evolution? )
      std::vector<int>     status;
@@ -587,7 +598,7 @@ class RootDigiBase {
 
   struct StripContainer {
    std::vector<int>               *SiWidth = nullptr;
-   std::vector<int>               *hitsInThirdTimeBin = nullptr;
+   std::vector<uint16_t>               *hitsInThirdTimeBin = nullptr;
    std::vector<int>               *side = nullptr;
    std::vector<std::vector<int> > *strip = nullptr;
    std::vector<std::vector<int> > *timebin = nullptr;
@@ -722,8 +733,13 @@ public:
 
      std::map<int, ActsFatras::Barcode> convertParticles(const AlgorithmContext& ctx);
      void convertMeasurements(const AlgorithmContext& ctx, const std::map<int, ActsFatras::Barcode> &barcode_map);
+     void dumpParticleHits(const Acts::GeometryContext& gctx,
+                           const Acts::TrackingGeometry &trackingGeometry,
+                           std::unordered_map<unsigned long, Acts::GeometryIdentifier> &geo_map) const;
 
      void showStat() const;
+private:
+   uint64_t m_events =0u;
 };
 
 inline TLeaf *ActsExamples::RootDigiBase::getLeaf(std::string leaf_name ) const {
@@ -843,7 +859,15 @@ inline void ActsExamples::RootDigiBase::connectBranch(std::string branch_name, T
 
    if (branch_addr) {
       ACTS_INFO("Connected branch " << branch_addr->GetName() );
-      m_activeBranches.push_back(branch_addr);
+      // TBranch *mother=branch_addr->GetMother();
+      // if (mother) {
+      //    if ( std::find(m_activeBranches.begin(), m_activeBranches.end(), mother) == m_activeBranches.end()) {
+      //       m_activeBranches.push_back(mother);
+      //    }
+      // }
+      // else {
+         m_activeBranches.push_back(branch_addr);
+         //      }
    }
    else {
       ACTS_ERROR("Failed to " << (m_write ? "create" : "get") << " branch " << branch_name );

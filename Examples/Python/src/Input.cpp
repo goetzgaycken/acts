@@ -55,7 +55,7 @@ void addInput(Context& ctx) {
                              particles,sourceLinks,measurements,measurementParticlesMap,filePath,fileMode,
                              treeName,truthParticlePrefix,truthVertexPrefix,
                              eventInfoPrefix,measurementPrefix,measurementType,
-                             trackingGeometry, outputFilePath, surfaceCenterFile, stop);
+                             trackingGeometry, outputFilePath, surfaceCenterFile, singleParticle, stop);
 
   // CSV READERS
   ACTS_PYTHON_DECLARE_READER(ActsExamples::CsvParticleReader, mex,

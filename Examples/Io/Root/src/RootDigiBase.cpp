@@ -6,6 +6,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "Acts/Surfaces/AnnulusBounds.hpp"
+#include "Acts/Surfaces/PlanarBounds.hpp"
 
 #include "ActsExamples/Io/Root/RootDigiBase.hpp"
 
@@ -300,7 +301,7 @@ void ActsExamples::RootDigiBase::connectParticles(const std::string &prefix, Act
    connectBranch((prefix+"pdgId").c_str(),                    &particles.pdgId);
    connectBranch((prefix+"barcode").c_str(),                  &particles.barcode);
    connectBranch((prefix+"status").c_str(),                   &particles.status);
-   connectBranch((prefix+"prodVtxLink_").c_str(),              &particles.n_prodVtxLink);
+   connectBranch((prefix+"prodVtxLink_").c_str(),             &particles.n_prodVtxLink);
    //   connectBranch((prefix+"prodVtxLink.m_persKey").c_str(),     particles.prodVtxLink_m_persKey);
    connectBranch((prefix+"prodVtxLink.m_persIndex").c_str(),   particles.prodVtxLink_m_persIndex);
    connectBranch((prefix+"decayVtxLink_").c_str(),             &particles.n_decayVtxLink);
@@ -500,11 +501,47 @@ ActsExamples::RootDigiReader::RootDigiReader() {
 ActsExamples::RootDigiReader::RootDigiReader(ActsExamples::RootDigiReader::Config cfg, Acts::Logging::Level lvl)
    : ActsExamples::RootDigiBase::RootDigiBase(cfg, "RootDigiWriter", false, lvl)
 {
+   if (m_tree) {
+      m_events=m_tree->GetEntries();
+      if (m_cfg.singleParticle) {
+         for (TBranch *branch : m_activeBranches) {
+            std::string branch_name (branch->GetName());
+            if (branch_name.find(cfg.truthParticlePrefix) != std::string::npos &&  branch_name.find("status")!= std::string::npos) {
+
+               uint64_t  entries = m_tree->GetEntries();
+               m_events=0;
+               for (uint64_t entry_i=0; entry_i< entries; ++ entry_i) {
+                  Long64_t current_tree_entry = m_tree->LoadTree(entry_i);
+                  if (current_tree_entry < 0) {
+                     break;
+                  }
+                  branch->GetEntry(current_tree_entry);
+                  std::size_t end_particle =m_truthParticles.status.size();
+                  for (unsigned int particle_i = 0; particle_i < end_particle; ++particle_i) {
+                     if (m_truthParticles.status.at(particle_i)==1) {
+                        ++m_events;
+                     }
+                  }
+               }
+               std::cout << "DEBUG RootDigiReader particles " << m_events << std::endl;
+               break;
+            }
+         }
+          //          if (m_truthParticles.status.at(particle_i)==1) {
+
+      }
+   }
 }
 
 std::pair<size_t, size_t> ActsExamples::RootDigiReader::availableEvents() const {
-   //   return std::make_pair(0u, m_tree->GetEntries() );
-   return std::make_pair(0u, 1u );
+   // if (m_cfg.singleParticle) {
+   //    // count particles
+   //    return std::make_pair(0u, 1000 /*m_tree->GetEntries()*/ );
+   // }
+   // else {
+   //    return std::make_pair(0u, m_tree->GetEntries() );
+   // }
+   return std::make_pair(0u, m_events );
 }
 
 
@@ -598,6 +635,7 @@ namespace {
 
 ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmContext& ctx) {
     auto entry = ctx.eventNumber;
+
     // if (not m_cfg.orderedEvents and entry < m_entryNumbers.size()) {
     //   entry = m_entryNumbers[entry];
     // }
@@ -605,11 +643,11 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
     //    m_tree->GetEntry(entry);
     std::lock_guard<std::mutex> lock(m_mutex);
 
-
-  // if (m_cfg.stop) {
-  //    std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
-  //    kill(getpid(), SIGSTOP);
-  // }
+    
+    if (m_cfg.stop) {
+       std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
+       kill(getpid(), SIGSTOP);
+    }
 
   // std::regex ignore(".*HGTD_NOTHING.*");
 
@@ -637,17 +675,39 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
     // if (!m_file) {
     //    setupTree();
     // }
+    bool read_next_entry=true;
+    if (m_cfg.singleParticle) {
+       if (m_nextEntry > 0 ) {
+          m_currentParticle = entry-m_entryOffset;
+          if (m_currentParticle<m_stableParticles.size()) {
+             std::cout << "DEBUG \"read\" particle " << m_currentParticle << std::endl;
+             read_next_entry=false;
+          }
+          else {
+             m_entryOffset+=m_currentParticle;
+             m_currentParticle=0;
+          }
+       }
+       entry = m_nextEntry;
+    }
 
+    if (read_next_entry) {
+       std::cout << "DEBUG read entry " << entry << std::endl;
     Long64_t current_tree_entry = m_tree->LoadTree(entry);
     if (current_tree_entry < 0) return ProcessCode::ABORT;
+    m_nextEntry=entry+1;
 
     for (TBranch *branch : m_activeBranches) {
+       if (!branch) continue;
        Long_t read_bytes = branch->GetEntry(current_tree_entry);
        if (read_bytes <=0 ) {
           ACTS_ERROR("Failed to read branch " << branch->GetName() << " from file " << (m_tree->GetDirectory() ? m_tree->GetDirectory()->GetFile()->GetName() : "") );
        }
        else {
-          TClass *the_class;
+          std::cout << "DEBUG " << name() << " read " << read_bytes << " for " << branch->GetName()
+                    << " adr= " << static_cast<const void *>(branch->GetAddress())
+                    << std::endl;
+          TClass *the_class=nullptr;
           EDataType the_type;
           branch->GetExpectedType(the_class,the_type);
           std::cout << "DEBUG " << name() << " read " << read_bytes << " for " << branch->GetName()
@@ -658,6 +718,48 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
        }
 
     }
+    if (m_cfg.singleParticle) {
+
+       std::set<int> particles_with_measurements;
+       for (const SDOInfoContainer &sdo_info : m_sdoInfo ) {
+          for (unsigned int meas_i=0; meas_i < sdo_info.sim_depositsBarcode->size(); ++meas_i) {
+             for ( const std::vector<int>  &sim_hit_list : sdo_info.sim_depositsBarcode->at(meas_i) ) {
+                for ( const int  &sim_barcode : sim_hit_list ) {
+                   particles_with_measurements.insert( sim_barcode);
+                }
+             }
+          }
+       }
+       m_stableParticles.clear();
+       unsigned int end_particle=m_truthParticles.barcode.size();
+       m_stableParticles.reserve( m_truthParticles.barcode.size() );
+       for (unsigned int particle_i = 0; particle_i < end_particle; ++particle_i) {
+          if (m_truthParticles.status.at(particle_i)==1) {
+             //if (   particles_with_measurements.find( m_truthParticles.barcode.at(particle_i) )
+             // != particles_with_measurements.end()) {
+             float pt = sqrt( sqr( m_truthParticles.px.at(particle_i))
+                              + sqr(  m_truthParticles.py.at(particle_i) ));
+
+             m_stableParticles.push_back( std::make_pair( pt, particle_i ) );
+          }
+       }
+       std::sort( m_stableParticles.begin(), m_stableParticles.end(), [](std::pair<float, unsigned int> &a,
+                                                                         std::pair<float, unsigned int> &b) {
+                     return a.first > b.first;
+                  });
+       unsigned int part_i=0;
+       for (const std::pair<float, unsigned int> &particle_idx : m_stableParticles) {
+          std::cout << "DEBUG stable particle "
+                    << part_i
+                    << " idx " << particle_idx.second
+                    << " barcode " << m_truthParticles.barcode.at(particle_idx.second)
+                    << " pdgId "  << m_truthParticles.pdgId.at(particle_idx.second)
+                    << " pt "  << particle_idx.first
+                    << std::endl;
+          ++part_i;
+       }
+    }
+
     if ( m_stat.empty() ) {
        m_stat.emplace_back( m_cfg.eventInfoPrefix,std::vector<std::pair<std::string,Stat> >() );
        m_stat.emplace_back( m_cfg.truthParticlePrefix, std::vector<std::pair<std::string,Stat> >() );
@@ -722,6 +824,7 @@ ActsExamples::ProcessCode ActsExamples::RootDigiReader::read(const AlgorithmCont
     }
     if (counter>0) std::cout << std::endl;
 # endif
+    }
 
   std::map<int, ActsFatras::Barcode>  barcode_map = convertParticles(ctx);
   convertMeasurements(ctx, barcode_map);
@@ -733,14 +836,32 @@ std::map<int, ActsFatras::Barcode> ActsExamples::RootDigiReader::convertParticle
   m_truthParticles.checkDimensions();
   m_truthVertices.checkDimensions();
   std::map<int, ActsFatras::Barcode> barcode_map;
-  for (unsigned int particle_i = 0; particle_i < m_truthParticles.pdgId.size(); ++particle_i) {
+  unsigned int start_particle=(m_cfg.singleParticle ? m_stableParticles.at(m_currentParticle).second : 0 );
+  unsigned int end_particle=(m_cfg.singleParticle ? start_particle+1 : m_truthParticles.pdgId.size() );
+  std::cout << "DEBUG convert particles  " << start_particle << " .. " << end_particle;
+  if (m_cfg.singleParticle) {
+     std::cout << " idx " << m_stableParticles.at(m_currentParticle).second
+               << " barcode " << m_truthParticles.barcode.at(start_particle)
+               << " pdgId "  << m_truthParticles.pdgId.at(start_particle)
+               << " pt "  << m_stableParticles.at(m_currentParticle).first;
+  }
+  std::cout << std::endl;
+
+  for (unsigned int particle_i = start_particle; particle_i < end_particle; ++particle_i) {
      // reject all non stable truth particles
+     if (!m_cfg.singleParticle) {
+     if (m_truthParticles.pdgId.at(particle_i) ==21 || m_truthParticles.pdgId.at(particle_i)==22)  {
+        continue;
+     }
      if (m_truthParticles.status.at(particle_i) != 1) {
         std::cout << "DEBUG reject non stable truth particle " << m_truthParticles.barcode.at(particle_i)
                   << " "  << m_truthParticles.pdgId.at(particle_i)
                   <<  " " << m_truthParticles.status.at(particle_i)
                   << std::endl;
         continue;
+     }
+     double pt = sqrt( sqr(m_truthParticles.px.at(particle_i)+m_truthParticles.py.at(particle_i)) );
+     if (pt<100) continue;
      }
 
      // somehow map the input barcode and vertex index to the ActsFatras::Barcode
@@ -1042,19 +1163,34 @@ namespace {
    static std::string cornersToStr(const Acts::Surface *a_surface,
                                    const Acts::GeometryContext &geo_ctx) {
       std::stringstream out;
-      const Acts::AnnulusBounds * annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &a_surface->bounds() );
-      if (annulus_bounds) {
-         Acts::Vector3 dummy_momentum{1.,1.,1.};
-         std::vector<Acts::Vector2> corners = annulus_bounds->corners();
-         unsigned int corner_i=0;
-         for (const Acts::Vector2 &a_corner  : corners) {
-            Acts::Vector3 glob = a_surface->localToGlobal(geo_ctx,
-                                                          a_corner,
-                                                          dummy_momentum);
-            out << " DEBUG surfaceBound corners " << a_surface->geometryId().value() << " "
-                << corner_i << " : " << glob[0] << " , " << glob[1] << " , " << glob[2] << std::endl;
-            ++corner_i;
+      std::vector<Acts::Vector2> corners;
+      if (a_surface) {
+         const Acts::AnnulusBounds *annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &a_surface->bounds() );
+         if (annulus_bounds) {
+            corners = annulus_bounds->corners();
          }
+         else {
+            const Acts::PlanarBounds *bounds = dynamic_cast<const Acts::PlanarBounds *>( &a_surface->bounds() );
+            if (bounds) {
+               corners = bounds->vertices(1);
+            }
+         }
+      }
+
+      // const Acts::AnnulusBounds * annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &a_surface->bounds() );
+      // if (annulus_bounds) {
+      Acts::Vector3 dummy_momentum{1.,1.,1.};
+
+
+      //    std::vector<Acts::Vector2> corners = annulus_bounds->corners();
+      unsigned int corner_i=0;
+      for (const Acts::Vector2 &a_corner  : corners) {
+         Acts::Vector3 glob = a_surface->localToGlobal(geo_ctx,
+                                                       a_corner,
+                                                       dummy_momentum);
+         out << " DEBUG surfaceBound corners " << a_surface->geometryId().value() << " "
+             << corner_i << " : " << glob[0] << " , " << glob[1] << " , " << glob[2] << std::endl;
+         ++corner_i;
       }
       return out.str();
    }
@@ -1399,6 +1535,137 @@ namespace {
       return barcode_iter->second;
    }
 }
+
+void ActsExamples::RootDigiReader::dumpParticleHits(const Acts::GeometryContext& gctx,
+                                                    const Acts::TrackingGeometry &trackingGeometry,
+                                                    std::unordered_map<unsigned long, Acts::GeometryIdentifier> &geo_map) const {
+   std::map<int, unsigned int> barcodeToParticle;
+   std::map<unsigned int, std::vector<std::pair<unsigned int, unsigned int> > > particleToHit;
+   std::vector< std::pair<float, unsigned int> > particle_order;
+
+  unsigned int start_particle=(m_cfg.singleParticle ? m_stableParticles.at(m_currentParticle).second : 0 );
+  unsigned int end_particle=(m_cfg.singleParticle ? start_particle+1 : m_truthParticles.pdgId.size() );
+
+   for (unsigned int particle_i = start_particle; particle_i < end_particle; ++particle_i) {
+      if (m_truthParticles.status.at(particle_i)==1) {
+         if (!barcodeToParticle.insert( std::make_pair( m_truthParticles.barcode.at(particle_i), particle_i ) ).second) {
+            std::cout << "WARNING barcode " <<  m_truthParticles.barcode.at(particle_i) << " of " << particle_i << " not unique." 
+                      << std::endl;
+         }
+         particle_order.push_back( std::pair<float,unsigned int>(  sqr(m_truthParticles.px.at(particle_i))
+                                                                 + sqr(m_truthParticles.py.at(particle_i)),
+                                                                 particle_i));
+      }
+   }
+   std::sort(particle_order.begin(), particle_order.end(),[](std::pair<float, unsigned int> &a, std::pair<float, unsigned int> &b) {
+      return a.first > b.first;
+   });
+
+   unsigned int container_i=0;
+   for (const SDOInfoContainer &sdo_info : m_sdoInfo ) {
+      for( unsigned int meas_i=0; meas_i<sdo_info.sim_depositsBarcode->size(); ++meas_i) {
+         for ( const std::vector<int>  &sim_hit_list : sdo_info.sim_depositsBarcode->at(meas_i)) {
+            unsigned int idx1=0;
+            for ( const int  &sim_barcode : sim_hit_list ) {
+               std::map<int, unsigned int>::const_iterator particle_iter = barcodeToParticle.find(sim_barcode);
+               if (particle_iter == barcodeToParticle.end()) continue;
+               std::vector<std::pair<unsigned int, unsigned int> > &particle_hits = particleToHit[ particle_iter->second ];
+               if (std::find(particle_hits.begin(),particle_hits.end(), std::make_pair(container_i, meas_i)) == particle_hits.end()) {
+                  particle_hits.push_back(std::make_pair(container_i, meas_i));
+               }
+            }
+         }
+      }
+      ++container_i;
+   }
+   Acts::Vector3 dummy_momentum{1.,1.,1.};
+   for (std::pair<float, unsigned int>  &part_idx : particle_order ) {
+      unsigned int part_i = part_idx.second;
+      double norm_scale = 1./sqrt(part_idx.first + sqr(m_truthParticles.pz.at(part_i)));
+      const std::vector<std::pair<unsigned int, unsigned int> > &particle_hits = particleToHit[ part_i ];
+      if (particle_hits.size()>0) {
+         std::cout << "ORIGPART " << m_truthParticles.pdgId.at(part_i)
+                   << " " << m_truthParticles.barcode.at(part_i)
+                   << " " << sqrt(part_idx.first)
+                   << " " << m_truthParticles.px.at(part_i)*norm_scale
+                   << " " << m_truthParticles.py.at(part_i)*norm_scale
+                   << " " << m_truthParticles.pz.at(part_i)*norm_scale
+                   << " " << particle_hits.size();
+
+
+
+
+         for (const std::pair<unsigned int, unsigned int> &container_meas : particle_hits) {
+            std::set<int> contributions;
+            for (const std::vector<int> &sim_hit_list:
+                    m_sdoInfo.at(container_meas.first).sim_depositsBarcode->at(container_meas.second) ) {
+               for (int barcode : sim_hit_list) {
+
+                  std::map<int, unsigned int>::const_iterator iter =  barcodeToParticle.find(barcode);
+                  if (iter != barcodeToParticle.end() && m_truthParticles.status.at(iter->second)==1) {
+                     int pdg_id = m_truthParticles.pdgId.at(iter->second);
+                     if (pdg_id != 21 && pdg_id != 22) {
+                        contributions.insert(barcode);
+                     }
+                  }
+               }
+            }
+            if (contributions.size()==0) {
+               std::cerr << "WARNING particle track without conributing stable, charged particles:" << std::endl;
+               for (const std::vector<int> &sim_hit_list:
+                       m_sdoInfo.at(container_meas.first).sim_depositsBarcode->at(container_meas.second) ) {
+                  for (int barcode : sim_hit_list) {
+                     
+                     std::cerr << "WARNING contribution to " <<container_meas.first << ", " << container_meas.second
+                               << " -> " << barcode << ":";
+                     std::map<int, unsigned int>::const_iterator iter =  barcodeToParticle.find(barcode);
+                     if (iter != barcodeToParticle.end()) {
+                        std::cerr << " status=" << m_truthParticles.status.at(iter->second)
+                                  << " pdgID=" << m_truthParticles.pdgId.at(iter->second);
+                     }
+                     std::cerr << std::endl;
+                  }
+               }
+            }
+            std::cout << " " << contributions.size();
+            std::cout << " " << m_clusters.at(container_meas.first).globalX->at(container_meas.second)
+                      << " " << m_clusters.at(container_meas.first).globalY->at(container_meas.second)
+                      << " " << m_clusters.at(container_meas.first).globalZ->at(container_meas.second);
+
+            std::vector<Acts::Vector2> corners;
+            const Acts::Surface *surface=nullptr;
+            std::unordered_map<unsigned long, Acts::GeometryIdentifier>::const_iterator
+               geomap_iter = geo_map.find(m_clusters.at(container_meas.first).detectorElementID->at(container_meas.second));
+            if (geomap_iter != geo_map.end()) {
+               surface = trackingGeometry.findSurface(geomap_iter->second);
+               if (surface) {
+                  const Acts::AnnulusBounds *annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &surface->bounds() );
+                  if (annulus_bounds) {
+                     corners = annulus_bounds->corners();
+                  }
+                  else {
+                     const Acts::PlanarBounds *bounds = dynamic_cast<const Acts::PlanarBounds *>( &surface->bounds() );
+                     if (bounds) {
+                        corners = bounds->vertices(1);
+                     }
+                  }
+               }
+            }
+            std::cout << " " << corners.size();
+            for (const Acts::Vector2 &a_corner  : corners) {
+               assert( surface != nullptr);
+               Acts::Vector3 glob = surface->localToGlobal(gctx,
+                                                           a_corner,
+                                                           dummy_momentum);
+               std::cout << " " << glob[0] << " " << glob[1] << " " << glob[2];
+            }
+         }
+         std::cout << std::endl;
+      }
+   }
+}
+
+
 void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& ctx,
                                                        const std::map<int, ActsFatras::Barcode> &barcode_map) {
   std::list<IndexSourceLink> sourceLinkStorage;
@@ -1487,15 +1754,33 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
   //       }
   //    }
   // }
-
+  for (const std::pair<const int,  ActsFatras::Barcode> &elm : barcode_map ) {
+     std::cout << "DEBUG convert measruements with hits from " << elm.first << " -> " << elm.second << std::endl;
+  }
   unsigned int container_i=0;
+  std::vector<unsigned int> measurements_per_container;
+  measurements_per_container.reserve(m_clusters.size());
   for (const ClusterContainer &cluster_container : m_clusters ) {
      cluster_container.checkDimensions();
      const SDOInfoContainer &sdo_info = m_sdoInfo.at(container_i);
      sdo_info.checkDimensions(cluster_container.localX->size());
      std::vector< unsigned int > mismatch;
-
+     unsigned int n_measurements_per_container=0;
      for (unsigned int meas_i=0; meas_i < cluster_container.localX->size(); ++meas_i) {
+        if (m_cfg.singleParticle) {
+           bool accept=false;
+           for ( const std::vector<int>  &sim_hit_list : sdo_info.sim_depositsBarcode->at(meas_i) ) {
+              for ( const int  &sim_barcode : sim_hit_list ) {
+                 if (barcode_map.find(sim_barcode) != barcode_map.end()) {
+                    accept=true;
+                    break;
+                 }
+              }
+              if (accept) break;
+           }
+           if (!accept) continue;
+           std::cout << "DEBUG convert measurement " << meas_i << std::endl;
+        }
         Index measurementIdx = measurements.size();
         //        Acts::GeometryIdentifier geoId
         std::pair<Acts::GeometryIdentifier,bool> ret =  findGeoId(ctx,
@@ -1540,6 +1825,8 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
         sourceLinkStorage.emplace_back(geoId, measurementIdx);
         IndexSourceLink& sourceLink = sourceLinkStorage.back();
 
+        std::cout << "DEBUG add measurement " << geoId << " -> " << measurementIdx << std::endl;
+
         sourceLinks.insert(sourceLink);
 
         // @TODO currently only 2D measurements are supported.
@@ -1552,10 +1839,66 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
         cov(0,1) = cluster_container.localXYCorrelation->at(meas_i);
         cov(1,0) = cluster_container.localXYCorrelation->at(meas_i);
 
-        
+        {
+           auto surface = m_cfg.trackingGeometry->findSurface(geoId);
+           Acts::Vector3 globalPos_converted = surface->localToGlobal(ctx.geoContext, par, Acts::Vector3());
+           Acts::Vector3 globalPos_orig( cluster_container.globalX->at(meas_i),
+                                         cluster_container.globalY->at(meas_i),
+                                         cluster_container.globalZ->at(meas_i));
+           Acts::Vector3 dummy_momentum{1.,1.,1.};
+           Acts::Result<Acts::Vector2> localPos_converted = surface->globalToLocal(ctx.geoContext,
+                                                                                   globalPos_orig,
+                                                                                   dummy_momentum,
+                                                                                   1e-3);
+
+           std::cout << "DEBUG convert measurement " << meas_i << " coord : "
+                     << par[0] << ", " << par[1] << "[ " << cov(0,0) << ", " << cov(1,1) << "; " << cov(0,1) << "] "
+                     << " | " << cluster_container.globalX->at(meas_i)
+                     << ", " << cluster_container.globalY->at(meas_i)
+                     << ", " << cluster_container.globalZ->at(meas_i)
+                     << std::endl
+                     << " -> " << localPos_converted.value()[0] << ", " << localPos_converted.value()[1]
+                     << (localPos_converted.ok() ? " OK  " : " ERR ")
+                     << " -> " << globalPos_converted[0]
+                     << ", " << globalPos_converted[1]
+                     << ", " << globalPos_converted[2]
+                     << std::endl
+                     << cornersToStr(surface, ctx.geoContext)
+                     << std::endl;
+           if (   std::abs(cluster_container.globalX->at(meas_i)-globalPos_converted[0])>1e-3
+               || std::abs(cluster_container.globalY->at(meas_i)-globalPos_converted[1])>1e-3
+               || std::abs(cluster_container.globalZ->at(meas_i)-globalPos_converted[2])>1e-3) {
+              std::cout << "ERROR global coordinate mismatch for measurement " << meas_i << " " << container_i
+                        << " : deltas "
+                        << (cluster_container.globalX->at(meas_i)-globalPos_converted[0])
+                        << ", " << (cluster_container.globalY->at(meas_i)-globalPos_converted[1])
+                        << ", " <<(cluster_container.globalZ->at(meas_i)-globalPos_converted[2])
+                        << std::endl;
+              double par0=par[0];
+              par[0]=par[1];
+              par[1]=par0;
+              globalPos_converted = surface->localToGlobal(ctx.geoContext, par, Acts::Vector3());
+              std::cout << "DEBUG try swapped local coordinates: "
+                     << " -> " << globalPos_converted[0]
+                        << ", " << globalPos_converted[1]
+                        << ", " << globalPos_converted[2]
+                        << " deltas : "
+                        << (cluster_container.globalX->at(meas_i)-globalPos_converted[0])
+                        << ", " << (cluster_container.globalY->at(meas_i)-globalPos_converted[1])
+                        << ", " <<(cluster_container.globalZ->at(meas_i)-globalPos_converted[2])
+                        << std::endl;
+
+              par[0] = localPos_converted.value()[0];
+              par[1] = localPos_converted.value()[1];
+              double sig_r = cov(0,0);
+              cov(0,0) = cov(1,1);
+              cov(1,1) = sig_r;
+           }
+        }
+
         measurements.emplace_back( Acts::Measurement<Acts::BoundIndices, 2>(Acts::SourceLink{geoId, sourceLink},
                                                                             indices, par, cov) );
-
+        ++n_measurements_per_container;
         unsigned int n_contributions=0;
         unsigned int n_contributions_validBarcode=0;
         double       energy=0.;
@@ -1638,16 +1981,28 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
         }
 
      }
-
+     measurements_per_container.push_back( n_measurements_per_container);
+     
      ++container_i;
+  }
+  {
+  container_i=0;
+  for (unsigned int value : measurements_per_container) {
+     std::cout << "DEBUG measurements per container " << container_i << " : " << value << std::endl;
+     ++container_i;
+  }
   }
   checkDestinationMultiplicity();
 
   if (m_cfg.stop) {
-     std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
-     kill(getpid(), SIGSTOP);
+     //     std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
+     //     kill(getpid(), SIGSTOP);
   }
 
+
+  dumpParticleHits(ctx.geoContext,
+                   *(m_cfg.trackingGeometry),
+                   geo_map);
 
   ctx.eventStore.add(m_cfg.sourceLinks, std::move(sourceLinks));
   ctx.eventStore.add(m_cfg.sourceLinks + "__storage",

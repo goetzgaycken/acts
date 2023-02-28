@@ -276,6 +276,7 @@ def addSeeding(
                 seedFilterConfigArg,
                 spacePointGridConfigArg,
                 acts.logging.VERBOSE # logLevel,
+                , trackingGeometry=trackingGeometry
             )
         elif seedingAlgorithm == SeedingAlgorithm.Orthogonal:
             logger.info("Using orthogonal seeding")
@@ -427,6 +428,7 @@ def addStandardSeeding(
     seedFilterConfigArg: SeedFilterConfigArg,
     spacePointGridConfigArg: SpacePointGridConfigArg,
     logLevel: acts.logging.Level = None,
+    trackingGeometry = None,
 ):
     """adds standard seeding
     For parameters description see addSeeding
@@ -567,6 +569,8 @@ def addStandardSeeding(
         seedFilterConfig=seedFilterConfig,
         seedFinderConfig=seedFinderConfig,
         seedFinderOptions=seedFinderOptions,
+        trackingGeometry=trackingGeometry,
+        stop=True,
     )
     sequence.addAlgorithm(seedingAlg)
     return seedingAlg.config.outputProtoTracks, seedingAlg.config.outputSeeds
