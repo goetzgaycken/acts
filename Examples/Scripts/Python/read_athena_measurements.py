@@ -49,7 +49,7 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
 
     # s = acts.examples.Sequencer(events=1, numThreads=-1, outputDir=str(outputDir))
     s = acts.examples.Sequencer(
-        events=int(os.environ.get("NEVENTS", 5)), numThreads=-11,
+        events=int(os.environ.get("NEVENTS", 10)), numThreads=1,
         outputDir=str(outputDir),
     )
 
@@ -86,7 +86,9 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
 
         surfaceCenterFile = '/tmp/surface_centers.txt',
         # when set to true, prrogram will be stopped upon construction to allow for a debugger to be attached
-        stop = True
+        stop = False,
+
+        singleParticle = True
     )
 
     s.addReader(digiReader)
@@ -104,7 +106,8 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
         #    seedingAlgorithm = SeedingAlgorithm.Orthogonal,
         inputParticles = "particles_final",
         seedingAlgorithm = SeedingAlgorithm.Default,
-        geoSelectionConfigFile=geo_dir / "itk-hgtd/geoSelection-ITk.json",
+        # geoSelectionConfigFile=geo_dir / "itk-hgtd/geoSelection-ITk.json",
+        geoSelectionConfigFile="geoSelection-athenaITk.json",
         outputDirRoot=outputDir,
     )
 
@@ -126,4 +129,9 @@ if "__main__" == __name__:
     # trackingGeometry=None
 
 #    readAthenaMeasurements(trackingGeometry, inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.pool.root', outputDir=os.getcwd()).run()
-    readAthenaMeasurements(trackingGeometry, inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.mu200_fullTruth.pool.root', outputDir=os.getcwd()).run()
+    readAthenaMeasurements(trackingGeometry,
+                           # inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.mu200_fullTruth.pool.root',
+                           # inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.ttbar.pool.root',
+                           # inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.minbias.pool.root',
+                           inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.ttbar.pool.root',
+                           outputDir=os.getcwd()).run()
