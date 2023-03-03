@@ -21,6 +21,8 @@
 #include "Acts/Geometry/LayerCreator.hpp"
 #include "Acts/Geometry/SurfaceArrayCreator.hpp"
 #include "Acts/Geometry/TrackingVolumeArrayCreator.hpp"
+#include "Acts/Material/ISurfaceMaterial.hpp"
+#include "Acts/Plugins/Json/MaterialJsonConverter.hpp"
 
 #include "GeantinoReader.hpp"
 
@@ -841,6 +843,7 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
    std::get<0>(surfaces_out).reserve( surface_list.size() );
    std::map<LayerId,LayerSurfaceInfo> layer_surface_map;
 
+
    Acts::GeometryContext geo_ctx;
 
    unsigned int counter_i=0;
@@ -910,6 +913,17 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
          else {
             insert_ret.first->second.nonSensitiveSurfaces.push_back( std::move(surface_ptr));
          }
+
+         if (a_surface["value"].contains("material") && a_surface["value"]["material"].contains("data")) {
+            const Acts::ISurfaceMaterial *surface_material = nullptr;
+            Acts::from_json(a_surface["value"]["material"],surface_material);
+            std::map<GeometryIdentifier, std::shared_ptr<const ISurfaceMaterial>> material;
+            std::cout << "DEBUG assign material to " << surface_ptr->geometryId() << " material -> " << surface_material
+                      << (surface_material ? typeid(*surface_material).name() : "<NONE>")
+                      << std::endl;
+            surface_ptr->assignSurfaceMaterial(std::move( std::shared_ptr<const ISurfaceMaterial>(surface_material) ) );
+         }
+
       }
       ++counter_i;
    }
@@ -958,9 +972,31 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
 
 }
 
+namespace {
+   class DummyMaterialDecorator : public  IMaterialDecorator {
+   public:
+      /// Decorate a surface
+      ///
+      /// @param surface the non-cost surface that is decorated
+      virtual void decorate([[maybe_unused]] Acts::Surface& surface) const override {}
+
+      /// Decorate a TrackingVolume
+      ///
+      /// @param volume the non-cost volume that is decorated
+      virtual void decorate([[maybe_unused]] Acts::TrackingVolume& volume) const override {}
+   };
+}
+
 std::shared_ptr<const Acts::TrackingGeometry>
 TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& tracking_geometry_description,
                                                    std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const {
+
+   if (m_cfg.stop) {
+      std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
+      kill(getpid(), SIGSTOP);
+   }
+
+
    auto [surfaces, surfaces_per_volume, detector_elements]
      = createSurfaces( tracking_geometry_description);
 
@@ -1012,12 +1048,9 @@ TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& trackin
 
    kdtgConfig.surfaces = std::move(surfaces);
    kdtgConfig.protoDetector = std::move(detector);
-   kdtgConfig.materialDecorator = std::move(mdecorator);
 
-   //  if (m_cfg.stop) {
-   //     std::cout << "DEBUG " << getpid() << " wait for signal CONT " << std::endl;
-   //     kill(getpid(), SIGSTOP);
-     //  }
+   std::shared_ptr<const Acts::IMaterialDecorator> dummy_material_decorator ( new DummyMaterialDecorator );
+   kdtgConfig.materialDecorator = std::move( dummy_material_decorator );
 
    kdtgConfig.creator=[&detector_elements](const MutableTrackingVolumePtr& a_highestVolume,
                          const IMaterialDecorator* a_materialDecorator) {

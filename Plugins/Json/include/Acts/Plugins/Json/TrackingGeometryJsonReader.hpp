@@ -37,6 +37,7 @@ public:
 
       std::string geantinoInputFileName;
       uint64_t maxGeantinoEntries;
+      bool stop = false;
    };
    TrackingGeometryJsonReader(const Config& cfg)  : m_cfg(cfg) {}
 

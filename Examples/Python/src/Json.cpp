@@ -152,6 +152,7 @@ void addJson(Context& ctx) {
     ACTS_PYTHON_MEMBER(logLevel);
     ACTS_PYTHON_MEMBER(geantinoInputFileName);
     ACTS_PYTHON_MEMBER(maxGeantinoEntries);
+    ACTS_PYTHON_MEMBER(stop);
     ACTS_PYTHON_STRUCT_END();
   }
 

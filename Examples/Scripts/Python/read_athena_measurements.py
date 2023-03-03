@@ -36,9 +36,12 @@ jsonTGReaderCfg =     acts.examples.TrackingGeometryJsonReader.Config(detectorNa
                                                     logLevel = acts.logging.VERBOSE,
                                                     # geantinoInputFileName = "geant4_material_tracks.root",
                                                     # maxGeantinoEntries = 1000
+                                                                      stop=True
                                                    )
 jsonTGReader=acts.examples.TrackingGeometryJsonReader(jsonTGReaderCfg)
-trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps-volbounds_2023.json", mdecorator)
+# trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps-volbounds_2023.json", mdecorator)
+trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco_default.json", mdecorator)
+
 
 print ("buildITkGeometry done")
 
