@@ -305,6 +305,26 @@ Acts::MutableLayerPtr Acts::LayerCreator::discLayer(
   double layerZ = protoLayer.medium(binZ);
   double layerThickness = protoLayer.range(binZ);
 
+  std::cout << "Creating a disk Layer:" << std::endl;
+  std::cout << " - at Z position    = " << layerZ << std::endl;
+  std::cout << " - from Z min/max   = " << protoLayer.min(binZ, false) << " / "
+            << protoLayer.max(binZ, false) << std::endl;
+  std::cout << " - with Z thickness = " << layerThickness << std::endl;
+  std::cout << "   - incl envelope  = " << protoLayer.envelope[binZ][0u]
+            << " / "
+            << protoLayer.envelope[binZ][1u]
+            << std::endl;
+  std::cout << " - with R min/max   = "
+            << protoLayer.min(binR, false) << " (-"
+            << protoLayer.envelope[binR][0u] << ") / "
+            << protoLayer.max(binR, false) << " (+"
+            << protoLayer.envelope[binR][1u] << ")"
+            << std::endl;
+  std::cout <<   " - with phi min/max = " << protoLayer.min(binPhi, false)
+            << " / "
+            << protoLayer.max(binPhi, false) << std::endl;
+  std::cout << " - # of modules     = " << surfaces.size() << std::endl;
+
   // adjust the layer radius
   ACTS_VERBOSE("Creating a disk Layer:");
   ACTS_VERBOSE(" - at Z position    = " << layerZ);

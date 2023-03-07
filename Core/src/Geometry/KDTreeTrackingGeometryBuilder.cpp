@@ -226,14 +226,17 @@ Acts::KDTreeTrackingGeometryBuilder::translateLayer(
     for (const auto& s : layerSurfaces) {
       cLayerSurfaces.push_back(s.second);
     }
+    bool dump_surfaces = false ; // (plVolume.name == "HGTD::NegativeEndcap_2");
+    unsigned int idx=0;
     for (const std::shared_ptr<const Surface> & a_surface :  cLayerSurfaces) {
        uint64_t geo_id = a_surface->geometryId().value();
-       if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
-          std::cout <<  "KDTree Surface " << geo_id<< " " << static_cast<const void *>(a_surface.get())
+       if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120 || dump_surfaces) {
+          std::cout <<  "KDTree Surface " << plVolume.name << " " << idx << " " << geo_id<< " " << static_cast<const void *>(a_surface.get())
                     << std::tuple<const Acts::Surface&,
                                   const Acts::GeometryContext&>(*a_surface,gctx)
                     << std::endl;
        }
+       ++idx;
     }
 
     Acts::BinningType bType0 = Acts::equidistant;
@@ -268,6 +271,13 @@ Acts::KDTreeTrackingGeometryBuilder::translateLayer(
                                                        bType0, bType1, pLayer);
 
     } else if (its.layerType == Acts::Surface::SurfaceType::Disc) {
+       std::cout << "DEBUG translateLayer " <<  plVolume.name
+                 << " z/r range = " << zrRange[0].min()  << " .. " << zrRange[0].max()
+                 << zrRange[1].min()  << " .. " << zrRange[1].max()
+                 << " bins " << bins0 << ", " << bins1
+                 << " pLayer: "
+                 << std::endl;
+       pLayer.toStream(std::cout);
       ACTS_VERBOSE(indent + ">> creating disc layer with "
                    << cLayerSurfaces.size() << " surfaces.");
       // Forced equidistant or auto-binned

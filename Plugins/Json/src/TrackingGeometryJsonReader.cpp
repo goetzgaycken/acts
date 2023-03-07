@@ -524,6 +524,17 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
                   }
                   case Acts::SurfaceBounds::eDisc: {
                      const Acts::RadialBounds &layer_bounds = static_cast<const Acts::RadialBounds &>(layer_surface->bounds());
+                     if (layer_thickness<=0. ) {
+                        std::cout << "ERROR layer " << layer_id << " of volume " << element.proto_volume.name
+                                  << " layer: " << layer_volume.name
+                                  << " disc layer thickness is zero : " <<  std::endl;
+                     }
+                     std::cout << "DEBUG add layer volume " << element.proto_volume.name
+                               << " Acts::binR " << layer_bounds.rMin() << " .. " << layer_bounds.rMax()
+                               << " Acts::binZ " << (layer_transform.translation()[2] - layer_thickness *.5)
+                               << " .. " << (layer_transform.translation()[2] + layer_thickness *.5)
+                               << std::endl;
+
                      layer_volume.extent.set(Acts::binR,layer_bounds.rMin(), layer_bounds.rMax());
                      layer_volume.extent.set(Acts::binZ,
                                              layer_transform.translation()[2] - layer_thickness *.5,
