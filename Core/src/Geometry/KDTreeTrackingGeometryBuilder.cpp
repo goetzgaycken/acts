@@ -260,6 +260,16 @@ Acts::KDTreeTrackingGeometryBuilder::translateLayer(
 
     Acts::ProtoLayer pLayer(gctx, cLayerSurfaces);
     pLayer.envelope = plVolume.extent.envelope();
+    if (pLayer.extent.range(Acts::binZ).min()==pLayer.extent.range(Acts::binZ).max()) {
+       pLayer.extent.set(Acts::binZ,
+                         std::min(pLayer.extent.range(Acts::binZ).min(), zrRange[0].min()),
+                         std::max(pLayer.extent.range(Acts::binZ).max(), zrRange[0].max()));
+    }
+    if (pLayer.extent.range(Acts::binR).min()==pLayer.extent.range(Acts::binR).max()) {
+       pLayer.extent.set(Acts::binR,
+                         std::min(pLayer.extent.range(Acts::binR).min(), zrRange[1].min()),
+                         std::max(pLayer.extent.range(Acts::binR).max(), zrRange[1].max()));
+    }
     if (its.layerType == Acts::Surface::SurfaceType::Cylinder) {
       ACTS_VERBOSE(indent + ">> creating cylinder layer with "
                    << cLayerSurfaces.size() << " surfaces.");
