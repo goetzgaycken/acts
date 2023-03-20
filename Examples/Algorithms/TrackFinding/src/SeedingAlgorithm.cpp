@@ -414,14 +414,18 @@ ActsExamples::ProcessCode ActsExamples::SeedingAlgorithm::execute(
 
   std::vector<const SimSpacePoint*> spacePointPtrs;
   spacePointPtrs.reserve(nSpacePoints);
+  unsigned int in_idx=0;
+  std::cout << "SEEDINPART 0 " << in_idx << "0. 0. 0. 0. " << nSpacePoints << " ";
   for (const auto& isp : m_cfg.inputSpacePoints) {
     for (const auto& spacePoint :
          ctx.eventStore.get<SimSpacePointContainer>(isp)) {
       // since the event store owns the space points, their pointers should be
       // stable and we do not need to create local copies.
+       std::cout << " " << spacePoint.x() << " " << spacePoint.y() << " " << spacePoint.z() << " 0";
       spacePointPtrs.push_back(&spacePoint);
     }
   }
+  std::cout << std::endl;
 
   // construct the seeding tools
   // covariance tool, extracts covariances per spacepoint as required
@@ -482,6 +486,81 @@ ActsExamples::ProcessCode ActsExamples::SeedingAlgorithm::execute(
   size_t nSeeds = seeds.size();
   static thread_local ProtoTrackContainer protoTracks;
   protoTracks.clear();
+
+  const Acts::Vector3 dummy_momentum{};
+  for (const auto& seed : seeds) {
+     unsigned int n_surf=0;
+     for (const auto& spacePoint : seed.sp()) {
+        // since the event store owns the space points, their pointers should be
+        // stable and we do not need to create local copies.
+
+         for(const auto &sl : spacePoint->sourceLinks() ) {
+            (void) sl;
+            ++n_surf;
+         }
+     }
+
+     std::cout << "SEEDOUT 0 " << in_idx << " 0. 0. 0. 0. " << n_surf << " ";
+     for (const auto& spacePoint : seed.sp()) {
+        // since the event store owns the space points, their pointers should be
+        // stable and we do not need to create local copies.
+
+         for(const auto &sl : spacePoint->sourceLinks() ) {
+            std::cout << " -1";
+            std::cout << " " << spacePoint->x() << " " << spacePoint->y() << " " << spacePoint->z();
+            const auto geoId = sl.geometryId();
+            //            const ActsExamples::IndexSourceLink& islink = sl.get<ActsExamples::IndexSourceLink>();
+            const Acts::Surface* a_surface=tg->findSurface(geoId);
+            if (a_surface) {
+               // Acts::Vector3 glob;
+               // if (measurements) {
+               //    std::visit([&geo_ctx, &dummy_momentum, a_surface, &glob](const auto& a_measurement) {
+               //          auto expander = a_measurement.expander();
+               //          Acts::BoundVector par = expander * a_measurement.parameters();
+               //          // extract local position
+               //          Acts::Vector2 lpar(par[Acts::eBoundLoc0], par[Acts::eBoundLoc1]);
+               //          glob = a_surface->localToGlobal(geo_ctx,
+               //                                          lpar,
+               //                                          dummy_momentum);
+               //       },measurements->at(islink.index()) );
+               // }
+               // else {
+               //    glob=Acts::Vector3(sp.x(),sp.y(),sp.z());
+               // }
+               // std::cout << " " << -1; // number of contributions
+               // std::cout << " " << glob[0]
+               //           << " " << glob[1]
+               //           << " " << glob[2];
+               const Acts::AnnulusBounds *annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &a_surface->bounds() );
+               std::vector<Acts::Vector2> corners;
+               if (annulus_bounds) {
+                  corners = annulus_bounds->corners();
+               }
+               else {
+                  const Acts::PlanarBounds *bounds = dynamic_cast<const Acts::PlanarBounds *>( &a_surface->bounds() );
+                  if (bounds) {
+                     corners = bounds->vertices(1);
+                  }
+               }
+               std::cout << " " << corners.size();
+               for (const Acts::Vector2 &a_corner  : corners) {
+                  assert( a_surface != nullptr);
+                  Acts::Vector3 glob_corner = a_surface->localToGlobal(geo_ctx,
+                                                                a_corner,
+                                                                dummy_momentum);
+                  std::cout << " " << glob_corner[0] << " " << glob_corner[1] << " " << glob_corner[2];
+               }
+            }
+            else {
+               std::cout << " 0";
+            }
+         }
+         // << " 0";
+     }
+     std::cout << std::endl;
+
+  }
+
 
   protoTracks.reserve(nSeeds);
   for (const auto& seed : seeds) {
