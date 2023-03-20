@@ -40,8 +40,8 @@ jsonTGReaderCfg =     acts.examples.TrackingGeometryJsonReader.Config(detectorNa
                                                    )
 jsonTGReader=acts.examples.TrackingGeometryJsonReader(jsonTGReaderCfg)
 # trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps-volbounds_2023.json", mdecorator)
-trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco_default.json", mdecorator)
-
+# trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco_default.json", mdecorator)
+trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco.json",mdecorator)
 
 print ("buildITkGeometry done")
 
@@ -110,7 +110,8 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
         inputParticles = "particles_final",
         seedingAlgorithm = SeedingAlgorithm.Default,
         # geoSelectionConfigFile=geo_dir / "itk-hgtd/geoSelection-ITk.json",
-        geoSelectionConfigFile="geoSelection-athenaITk.json",
+        # geoSelectionConfigFile="geoSelection-athenaITk.json",
+        geoSelectionConfigFile="geoSelection-athenaITkHGTD.json",
         outputDirRoot=outputDir,
     )
 
@@ -136,5 +137,6 @@ if "__main__" == __name__:
                            # inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.mu200_fullTruth.pool.root',
                            # inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.ttbar.pool.root',
                            # inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.minbias.pool.root',
-                           inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.ttbar.pool.root',
+                           # inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.ttbar.pool.root',
+                           inputFile='/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/AOD.single_muon.pool.root',
                            outputDir=os.getcwd()).run()
