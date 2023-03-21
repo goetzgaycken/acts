@@ -38,6 +38,10 @@
 #include <TTree.h>
 #include <TVectorF.h>
 
+#include "Acts/Surfaces/AnnulusBounds.hpp"
+#include "Acts/Surfaces/PlanarBounds.hpp"
+#include "Acts/Surfaces/RectangleBounds.hpp"
+
 ActsExamples::CKFPerformanceWriter::CKFPerformanceWriter(
     ActsExamples::CKFPerformanceWriter::Config cfg, Acts::Logging::Level lvl)
     : WriterT(cfg.inputTrajectories, "CKFPerformanceWriter", lvl),
@@ -205,7 +209,7 @@ namespace {
       return param[Acts::eBoundQOverP] != 0. ? std::sin(param[Acts::eBoundTheta]) / std::abs(param[Acts::eBoundQOverP]) : 0.;
    }
 
-   Acts::Vector3 globalCoords(const Acts::TrackingGeometry &tracking_geometetry,
+   Acts::Vector3 globalCoords(const Acts::TrackingGeometry &tracking_geometry,
                               const Acts::GeometryContext& gctx,
                               const ActsExamples::Measurement& meas) {
       const auto& slink =
@@ -213,7 +217,7 @@ namespace {
 
       const auto geoId = slink->geometryId();
 
-      const Acts::Surface* surface = tracking_geometetry.findSurface(geoId);
+      const Acts::Surface* surface = tracking_geometry.findSurface(geoId);
       Acts::Vector2 localPos = std::visit(
                                              [](const auto& measurement) {
                                                 auto expander = measurement.expander();
@@ -571,6 +575,266 @@ namespace {
       dumpArray(header, quality,quality_names, floats_per_column);
    }
 
+   void dumpTrajectory(ActsFatras::Barcode max_barcode,
+                       const ActsExamples::SimParticleContainer &particles,
+                       const ActsExamples::IndexMultimap<ActsFatras::Barcode> &hitParticlesMap,
+                       const Acts::TrackingGeometry &tracking_geometry,
+                       const Acts::GeometryContext & gctx,
+                       const ActsExamples::MeasurementContainer &measurements,
+                       const Acts::VectorMultiTrajectory &trajectory,
+                       Acts::MultiTrajectoryTraits::IndexType trackTip
+                       ) {
+      std::cout << "TRAJECTORY ";
+      auto particle_iter = particles.find(max_barcode);
+      if (particle_iter != particles.end()) {
+         Acts::Vector3 direction(particle_iter->unitDirection());
+         std::cout << particle_iter->pdg() << " " << max_barcode.value()
+                   << " " << particle_iter->transverseMomentum()
+                   << " " << direction[0]
+                   << " " << direction[1]
+                   << " " << direction[2];
+      }
+      else {
+         std::cout << "0" <<  " " << max_barcode.value()
+                   << " " << "0."
+                   << " " << "0."
+                   << " " << "0."
+                   << " " << "0.";
+      }
+      unsigned int n_hits=0;
+      trajectory.visitBackwards(trackTip, [&n_hits](const auto& state) {
+            // no truth info with non-measurement state
+            if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
+               return true;
+            }
+            ++n_hits;
+            return true;
+         });
+
+      std::cout << " " << n_hits;
+      trajectory.visitBackwards(trackTip, [&](const auto& state) {
+            // no truth info with non-measurement state
+            if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
+               return true;
+            }
+
+            // register all particles that generated this hit
+            const auto& sl = state.uncalibratedSourceLink().template get<ActsExamples::IndexSourceLink>();
+            auto hitIndex = sl.index();
+
+
+            const ActsExamples::Measurement& meas = measurements.at(hitIndex);
+            const auto& slink =
+               std::visit([](const auto& x) { return &x.sourceLink(); }, meas);
+
+
+
+            const auto geoId = slink->geometryId();
+
+            const Acts::Surface* surface = tracking_geometry.findSurface(geoId);
+            Acts::Vector2 localPos = std::visit(
+                                                [](const auto& measurement) {
+                                                   auto expander = measurement.expander();
+                                                   Acts::BoundVector par = expander * measurement.parameters();
+                                                   Acts::Vector2 lpar(par[Acts::eBoundLoc0], par[Acts::eBoundLoc1]);
+                                                   return lpar;
+                                                },
+                                                meas);
+            Acts::Vector3 globalPos = surface->localToGlobal(gctx, localPos, Acts::Vector3());
+
+            std::cout << " " << ActsExamples::makeRange(hitParticlesMap.equal_range(hitIndex)).size()
+                      << " " << globalPos[0]
+                      << " " << globalPos[1]
+                      << " " << globalPos[2];
+
+            const Acts::Surface* a_surface=tracking_geometry.findSurface(geoId);
+            if (a_surface) {
+               const Acts::AnnulusBounds *annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &a_surface->bounds() );
+               std::vector<Acts::Vector2> corners;
+               if (annulus_bounds) {
+                  corners = annulus_bounds->corners();
+               }
+               else {
+                  const Acts::PlanarBounds *bounds = dynamic_cast<const Acts::PlanarBounds *>( &a_surface->bounds() );
+                  if (bounds) {
+                     corners = bounds->vertices(1);
+                  }
+               }
+               std::cout << " " << corners.size();
+               Acts::Vector3 dummy_momentum{};
+               for (const Acts::Vector2 &a_corner  : corners) {
+                  assert( a_surface != nullptr);
+                  Acts::Vector3 glob_corner = a_surface->localToGlobal(gctx,
+                                                                       a_corner,
+                                                                       dummy_momentum);
+                  std::cout << " " << glob_corner[0] << " " << glob_corner[1] << " " << glob_corner[2];
+               }
+            }
+            else {
+               std::cout << " 0";
+            }
+            return true;
+         });
+      std::cout << std::endl;
+   }
+
+   std::array< Acts::Vector2, 2> getStripEnds(const Acts::Surface &a_surface, float local0) {
+      const Acts::AnnulusBounds *annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &a_surface.bounds() );
+      std::vector<Acts::Vector2> corners;
+      if (annulus_bounds) {
+         return { Acts::Vector2{local0, annulus_bounds->rMin()},
+                  Acts::Vector2{local0, annulus_bounds->rMax()} };
+      }
+      else {
+         const Acts::PlanarBounds *bounds = dynamic_cast<const Acts::PlanarBounds *>( &a_surface.bounds() );
+         if (bounds) {
+            return std::array< Acts::Vector2, 2> { Acts::Vector2{local0, bounds->boundingBox().min().y()},
+                                                   Acts::Vector2{local0, bounds->boundingBox().max().y()} };
+         }
+      }
+      return std::array< Acts::Vector2, 2> { Acts::Vector2{local0, 0.},
+                                             Acts::Vector2{local0, 0.} };
+   }
+
+   void dumpParicleHits(std::map<ActsFatras::Barcode, std::vector<ActsExamples::Index> > particleToHit,
+                        const ActsExamples::SimParticleContainer &particles,
+                        const ActsExamples::IndexMultimap<ActsFatras::Barcode> &hitParticlesMap,
+                        const Acts::TrackingGeometry &tracking_geometry,
+                        const Acts::GeometryContext & gctx,
+                        const ActsExamples::MeasurementContainer &measurements) {
+      for (const std::pair< const ActsFatras::Barcode, std::vector<ActsExamples::Index> > &particle_hits : particleToHit) {
+         ActsFatras::Barcode the_barcode = particle_hits.first;
+         const std::vector<ActsExamples::Index> &the_hits  = particle_hits.second;
+
+         std::cout << "PARTHITS ";
+         auto particle_iter = particles.find(the_barcode);
+         if (particle_iter != particles.end()) {
+            Acts::Vector3 direction(particle_iter->unitDirection());
+            std::cout << particle_iter->pdg() << " " << the_barcode.value()
+                      << " " << particle_iter->transverseMomentum()
+                      << " " << direction[0]
+                      << " " << direction[1]
+                      << " " << direction[2];
+         }
+         else {
+            std::cout << "0" <<  " " << the_barcode.value()
+                      << " " << "0."
+                      << " " << "0."
+                      << " " << "0."
+                      << " " << "0.";
+         }
+
+         unsigned int n_hits=0;
+         for (ActsExamples::Index hitIndex : the_hits) {
+            const ActsExamples::Measurement& meas = measurements.at(hitIndex);
+            const auto& slink =
+               std::visit([](const auto& x) { return &x.sourceLink(); }, meas);
+
+            const auto geoId = slink->geometryId();
+
+            const Acts::Surface* surface = tracking_geometry.findSurface(geoId);
+            auto [ /*Acts::Vector2*/ localPos,
+                   /*unsigned int */ num_param ]
+               = std::visit(
+                            [](const auto& measurement) {
+                               auto expander = measurement.expander();
+                               Acts::BoundVector par = expander * measurement.parameters();
+                               Acts::Vector2 lpar(par[Acts::eBoundLoc0], par[Acts::eBoundLoc1]);
+                               return std::make_pair( lpar, measurement.size());
+                            },
+                            meas);
+            const Acts::Surface* a_surface=tracking_geometry.findSurface(geoId);
+            ++n_hits;
+            if (a_surface && num_param==1) {
+               n_hits += 2;
+            }
+         }
+
+         std::cout << " " << n_hits;
+         for (ActsExamples::Index hitIndex : the_hits) {
+            // trajectory.visitBackwards(trackTip, [&](const auto& state) {
+            //       // no truth info with non-measurement state
+            //       if (not state.typeFlags().test(Acts::TrackStateFlag::MeasurementFlag)) {
+            //          return true;
+            //       }
+
+            //       // register all particles that generated this hit
+            //       const auto& sl = state.uncalibratedSourceLink().template get<ActsExamples::IndexSourceLink>();
+            //       auto hitIndex = sl.index();
+
+
+            const ActsExamples::Measurement& meas = measurements.at(hitIndex);
+            const auto& slink =
+               std::visit([](const auto& x) { return &x.sourceLink(); }, meas);
+
+
+
+            const auto geoId = slink->geometryId();
+
+            const Acts::Surface* surface = tracking_geometry.findSurface(geoId);
+            auto [ /*Acts::Vector2*/ localPos,
+                   /*unsigned int */ num_param ]
+               = std::visit(
+                            [](const auto& measurement) {
+                               auto expander = measurement.expander();
+                               Acts::BoundVector par = expander * measurement.parameters();
+                               Acts::Vector2 lpar(par[Acts::eBoundLoc0], par[Acts::eBoundLoc1]);
+                               return std::make_pair( lpar, measurement.size());
+                            },
+                            meas);
+            Acts::Vector3 globalPos = surface->localToGlobal(gctx, localPos, Acts::Vector3());
+
+            std::cout << " " << ActsExamples::makeRange(hitParticlesMap.equal_range(hitIndex)).size()
+                      << " " << globalPos[0]
+                      << " " << globalPos[1]
+                      << " " << globalPos[2];
+
+            const Acts::Surface* a_surface=tracking_geometry.findSurface(geoId);
+            if (a_surface) {
+               const Acts::AnnulusBounds *annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &a_surface->bounds() );
+               std::vector<Acts::Vector2> corners;
+               if (annulus_bounds) {
+                  corners = annulus_bounds->corners();
+               }
+               else {
+                  const Acts::PlanarBounds *bounds = dynamic_cast<const Acts::PlanarBounds *>( &a_surface->bounds() );
+                  if (bounds) {
+                     corners = bounds->vertices(1);
+                  }
+               }
+               std::cout << " " << corners.size();
+               Acts::Vector3 dummy_momentum{};
+               for (const Acts::Vector2 &a_corner  : corners) {
+                  assert( a_surface != nullptr);
+                  Acts::Vector3 glob_corner = a_surface->localToGlobal(gctx,
+                                                                       a_corner,
+                                                                       dummy_momentum);
+                  std::cout << " " << glob_corner[0] << " " << glob_corner[1] << " " << glob_corner[2];
+               }
+               if (num_param==1) {
+                  std::array< Acts::Vector2, 2> strip_ends = getStripEnds(*a_surface, localPos[0]);
+                  static const std::array<unsigned int,2> code { 50, 60};
+                  unsigned int param_i=0;
+                  for (const Acts::Vector2 &strip_end : strip_ends) {
+                     Acts::Vector3 strip_globalPos = surface->localToGlobal(gctx, strip_end, Acts::Vector3());
+                     std::cout << " " << code[param_i]
+                               << " " << strip_globalPos[0]
+                               << " " << strip_globalPos[1]
+                               << " " << strip_globalPos[2]
+                               << " " << 0;
+                     ++param_i;
+                  }
+               }
+
+            }
+            else {
+               std::cout << " 0";
+            }
+         }
+      }
+      std::cout << std::endl;
+   }
+
 }
 
 void  ActsExamples::CKFPerformanceWriter::dumpStat() {
@@ -694,6 +958,13 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   unsigned int max_hit_index=0;
   unsigned int plot_i=0;
   std::set<unsigned int> visualised;
+
+  dumpParicleHits(particleToHit,
+                  particles,
+                  hitParticlesMap,
+                  *(m_cfg.trackingGeometry),
+                  ctx.geoContext,
+                  measurements);
 
   static unsigned int debug_counter=0;
   // Loop over all trajectories
@@ -846,6 +1117,14 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
              max_count=part.second.counts();
           }
        }
+       dumpTrajectory(max_barcode,
+                      particles,
+                      hitParticlesMap,
+                      *(m_cfg.trackingGeometry),
+                      ctx.geoContext,
+                      measurements,
+                      traj.multiTrajectory(),
+                      trackTip );
        auto particle_iter = particles.find(max_barcode);
        double particle_pt= particle_iter != particles.end()
           ? particle_iter->transverseMomentum()
