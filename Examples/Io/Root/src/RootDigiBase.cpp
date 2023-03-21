@@ -1937,6 +1937,9 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
                        break;
                     }
                  }
+                 std::cout << "DEBUG sim barcode " << sim_barcode << " -> " << particle_id
+                           << " | " << (has_barcode ? " has barcode" : "")
+                           << std::endl;
                  if (!has_barcode) {
                     measurementParticlesMap.emplace_hint( (particle_range.first == particle_range.second
                                                            ? measurementParticlesMap.end()
