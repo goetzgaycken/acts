@@ -1896,8 +1896,25 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
            }
         }
 
-        measurements.emplace_back( Acts::Measurement<Acts::BoundIndices, 2>(Acts::SourceLink{geoId, sourceLink},
-                                                                            indices, par, cov) );
+        switch (container_i) {
+           case 0: /* pixel */
+              measurements.emplace_back( Acts::Measurement<Acts::BoundIndices, 2>(Acts::SourceLink{geoId, sourceLink},
+                                                                                  indices, par, cov) );
+              break;
+           case 1: /* strips */
+              {
+
+                  std::array<Acts::BoundIndices, 1> strip_indices{indices[0]};
+                  Acts::ActsVector<1> strip_par {par[0]};
+                  Acts::ActsSymMatrix<1> strip_cov {cov(0,0) };
+
+                 measurements.emplace_back( Acts::Measurement<Acts::BoundIndices, 1>(Acts::SourceLink{geoId, sourceLink},
+                                                                                     strip_indices, strip_par, strip_cov) );
+                 break;
+              }
+           default :
+              throw std::runtime_error("Currently assuming container_i==0 -> pixel; container_i==1 -> strips. Nothing else supported.");
+           }
         ++n_measurements_per_container;
         unsigned int n_contributions=0;
         unsigned int n_contributions_validBarcode=0;
