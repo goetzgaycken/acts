@@ -1,8 +1,3 @@
-#include <iostream>
-
-namespace {
-   inline double sqr(double a) { return a*a; }
-}
 // This file is part of the Acts project.
 //
 // Copyright (C) 2019 CERN for the benefit of the Acts project
@@ -67,26 +62,10 @@ Acts::BinnedSPGroup<external_spacepoint_t>::BinnedSPGroup(
     rRangeSPExtent.extend({spX, spY, spZ});
 
     if (spZ > zMax || spZ < zMin) {
-      auto bins = grid->localBinsFromPosition(spPosition);
-      std::cout << "DEBUG reject (1) space point " << std::sqrt( sqr( spX) + sqr(spY) ) << ", " << spZ
-                << " z in (" << zMin << " .. " << zMax
-                << ") ->";
-      for (auto bin_i : bins ) {
-         std::cout << " " << bin_i;
-      }
-      std::cout << std::endl;
       continue;
     }
     float spPhi = std::atan2(spY, spX);
     if (spPhi > phiMax || spPhi < phiMin) {
-      auto bins = grid->localBinsFromPosition(spPosition);
-      std::cout << "DEBUG reject (2) space point " << std::sqrt( sqr( spX) + sqr(spY) ) << ", " << spZ
-                << " phi " << spPhi << " in (" << phiMin << " .. " << phiMax
-                << " ->";
-      for (auto bin_i : bins ) {
-         std::cout << " " << bin_i;
-      }
-      std::cout << std::endl;
       continue;
     }
 
@@ -97,14 +76,6 @@ Acts::BinnedSPGroup<external_spacepoint_t>::BinnedSPGroup(
     size_t rIndex = static_cast<size_t>(isp->radius() / config.binSizeR);
     // if index out of bounds, the SP is outside the region of interest
     if (rIndex >= numRBins) {
-      auto bins = grid->localBinsFromPosition(spPosition);
-      std::cout << "DEBUG reject (3) space point " << isp->radius() << ", " << isp->z()
-                << " ->";
-      for (auto bin_i : bins ) {
-         std::cout << " " << bin_i;
-      }
-      std::cout << "(rIndex " << rIndex << "; r-bins: " << numRBins << ")" << std::endl;
-      //<< rIndex << ", " << grid->globalBinFromPosition(spLocation) << std::endl;
       continue;
     }
     rBins[rIndex].push_back(std::move(isp));
@@ -126,29 +97,17 @@ Acts::BinnedSPGroup<external_spacepoint_t>::BinnedSPGroup(
   // fill rbins into grid such that each grid bin is sorted in r
   // space points with delta r < rbin size can be out of order is sorting is not
   // requested
-  unsigned int r_i=0;
   for (auto& rbin : rBins) {
     for (auto& isp : rbin) {
       Acts::Vector2 spLocation(isp->phi(), isp->z());
       std::vector<std::unique_ptr<InternalSpacePoint<external_spacepoint_t>>>&
           bin = grid->atPosition(spLocation);
-      auto bins = grid->localBinsFromPosition(Acts::Vector3{isp->x(),isp->y(), isp->z()} );
-      std::cout << "DEBUG associate to bins space point " << isp->radius() << ", " << isp->z()
-                << " ->";
-      for (auto bin_i : bins ) {
-         std::cout << " " << bin_i;
-      }
-      std::cout << std::endl;
-      //      std::cout << "DEBUG associate to bins space point " << isp->radius() << ", " << isp->z()
-      //                << " -> " << r_i << ", " << grid->globalBinFromPosition(spLocation) << std::endl;
       bin.push_back(std::move(isp));
     }
-    ++r_i;
   }
   m_binnedSP = std::move(grid);
   m_bottomBinFinder = botBinFinder;
   m_topBinFinder = tBinFinder;
-
 
   m_bins = config.zBinsCustomLooping;
 }

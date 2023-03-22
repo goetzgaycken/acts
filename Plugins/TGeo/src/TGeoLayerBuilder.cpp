@@ -231,9 +231,6 @@ void Acts::TGeoLayerBuilder::buildLayers(const GeometryContext& gctx,
             m_cfg.elementFactory(identifier, *snode.node, *snode.transform,
                                  layerCfg.localAxes, m_cfg.unit, nullptr);
 
-        if (m_cfg.detectorElementSplitter) {
-           std::cout << "DEBUG Splitter split volume  " << tVolume->GetName() << std::endl;
-        }
         std::vector<std::shared_ptr<const Acts::TGeoDetectorElement>>
             tgElements =
                 (m_cfg.detectorElementSplitter == nullptr)
@@ -241,7 +238,7 @@ void Acts::TGeoLayerBuilder::buildLayers(const GeometryContext& gctx,
                           const Acts::TGeoDetectorElement>>{tgElement}
                     : m_cfg.detectorElementSplitter->split(gctx, tgElement);
 
-        for (const auto &tge : tgElements) {
+        for (const auto& tge : tgElements) {
           m_elementStore.push_back(tge);
           layerSurfaces.push_back(tge->surface().getSharedPtr());
         }

@@ -149,54 +149,12 @@ Acts::TGeoSurfaceConverter::discComponents(const TGeoShape& tgShape,
           const Double_t* polyVrt = maskShape->GetVertices();
           // the poly has a translation matrix in ROOT
           // we apply it to the vertices directly
-          const Double_t* polyTrl = nullptr;
-          polyTrl = (maskTransform->GetTranslation());
-
-          auto tubeTransform = interNode->GetLeftMatrix();
-          std::cout << "DEBUG annulus bounds tube transform center ";
-          for (unsigned int i=0; i<3; ++i) {
-             if (i!=0) {
-                std::cout << " , ";
-             }
-             std::cout << tubeTransform->GetTranslation()[i];
-          }
-          std::cout << " scale ";
-          for (unsigned int i=0; i<3; ++i) {
-             if (i!=0) {
-                std::cout << " , ";
-             }
-             std::cout << tubeTransform->GetScale()[i];
-          }
-          std::cout << std::endl;
-          static const char *col_name[3]={"x","y","z"};
-          for (unsigned int col_i=0; col_i<3; ++col_i) {
-             std::cout << "DEBUG annulus bounds tube rotation " << col_name[col_i];
-             for (unsigned i=0; i<3; ++i) {
-                if (i!=0) {
-                   std::cout << " , ";
-                }
-                std::cout << tubeTransform->GetRotationMatrix()[i*3+col_i];
-             }
-          }
-          for (unsigned int v=0; v<8; v+=2) {
-             std::array<double,3> local{polyVrt[v + 0], polyVrt[v + 1], maskShape->GetDZ()};
-             std::array<double,3> global;
-             maskTransform->LocalToMaster(local.data(),global.data());
-             std::cout << "DEBUG annulus bounds from " << tgShape.GetName() << " " << (v/2) << " : "
-                       << ((polyTrl[0] + polyVrt[v + 0]) * scalor) << " , "
-                       << ((polyTrl[1] + polyVrt[v + 1]) * scalor)
-                       << " -> " << (global[0]*scalor) << ", " << (global[1]*scalor) << " , " << (global[2]*scalor)
-                       << std::endl;
-          }
-
           std::vector<Vector2> vertices;
           for (unsigned int v = 0; v < 8; v += 2) {
-            std::array<double,3> local{polyVrt[v + 0], polyVrt[v + 1], 0.};
-            std::array<double,3> global;
-            maskTransform->LocalToMaster(local.data(),global.data());
-            // Vector2 vtx = Vector2((polyTrl[0] + polyVrt[v + 0]) * scalor,
-            //                       (polyTrl[1] + polyVrt[v + 1]) * scalor);
-            Vector2 vtx = Vector2(global[0]*scalor,global[1]*scalor);
+            std::array<double, 3> local{polyVrt[v + 0], polyVrt[v + 1], 0.};
+            std::array<double, 3> global{};
+            maskTransform->LocalToMaster(local.data(), global.data());
+            Vector2 vtx = Vector2(global[0] * scalor, global[1] * scalor);
             vertices.push_back(vtx);
           }
 
@@ -240,14 +198,6 @@ Acts::TGeoSurfaceConverter::discComponents(const TGeoShape& tgShape,
           double phiMax = std::max(phi1, phi2);
           double phiMin = std::min(phi1, phi2);
           double phiShift = 0.;
-
-          std::cout << "DEBUG annulus bounds from " << tgShape.GetName()
-                    << " scalor " << scalor
-                    << " r " << rMin << " .. " << rMax
-                    << " phi "  << phiMin  << " .. " << phiMax
-                    << " focal " << originShift[0] << " , " << originShift[1]
-                    << std::endl;
-
 
           // Create the bounds
           auto annulusBounds = std::make_shared<const AnnulusBounds>(

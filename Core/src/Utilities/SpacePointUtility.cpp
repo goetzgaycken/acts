@@ -9,6 +9,7 @@
 #include "Acts/Utilities/SpacePointUtility.hpp"
 
 #include <iostream>
+#include <sstream>
 namespace Acts {
 
 Result<double> SpacePointUtility::differenceOfMeasurementsChecked(
@@ -48,12 +49,14 @@ std::pair<Vector3, Vector2> SpacePointUtility::globalCoords(
 
   const Surface* surface = m_config.trackingGeometry->findSurface(geoId);
   if (!surface) {
-     std::cout << "ERROR no surface from measurement: " << std::endl;
-     std::visit([](const auto& x) { std::cout << x.parameters()
-                                              << " sourceLink " << x.sourceLink().geometryId().value()
-                                              << " " << x.sourceLink().geometryId()
-                                              << std::endl; }, meas);
-     throw std::runtime_error("Invalid sourceLink." );
+     std::stringstream msg;
+     msg << "Invalid source link: no surface for measurement matching geo. ID: ";
+     std::visit([&msg](const auto& measurement) {
+           msg << measurement.parameters() << " sourceLink "
+               << measurement.sourceLink().geometryId().value()
+               << " " << measurement.sourceLink().geometryId();
+        }, meas);
+     throw std::runtime_error(msg.str());
   }
   auto [localPos, localCov] = std::visit(
       [](const auto& measurement) {

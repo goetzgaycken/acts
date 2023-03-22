@@ -113,19 +113,6 @@ Acts::MutableLayerPtr Acts::LayerCreator::cylinderLayer(
     ACTS_ERROR("Creation of cylinder layer did not succeed!");
   }
   associateSurfacesToLayer(*cLayer);
-  {
-     const auto &d_layer_surfaces = cLayer->surfaceArray()->surfaces();
-
-     for (auto& surface : d_layer_surfaces) {
-        uint64_t geo_id = surface->geometryId().value();
-        if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
-           std::cout <<  "KDTree Surface " << geo_id<< " " << static_cast<const void *>(surface)
-                     << std::tuple<const Acts::Surface&,
-                                   const Acts::GeometryContext&>(*surface,gctx)
-                                                                   << std::endl;
-        }
-     }
-  }
 
   // now return
   return cLayer;
@@ -199,19 +186,6 @@ Acts::MutableLayerPtr Acts::LayerCreator::cylinderLayer(
     ACTS_ERROR("Creation of cylinder layer did not succeed!");
   }
   associateSurfacesToLayer(*cLayer);
-  {
-     const auto &d_layer_surfaces = cLayer->surfaceArray()->surfaces();
-
-     for (auto& surface : d_layer_surfaces) {
-        uint64_t geo_id = surface->geometryId().value();
-        if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
-           std::cout <<  "KDTree Surface " << geo_id<< " " << static_cast<const void *>(surface)
-                     << std::tuple<const Acts::Surface&,
-                                   const Acts::GeometryContext&>(*surface,gctx)
-                                                                   << std::endl;
-        }
-     }
-  }
 
   // now return
   return cLayer;
@@ -277,19 +251,6 @@ Acts::MutableLayerPtr Acts::LayerCreator::discLayer(
     ACTS_ERROR("Creation of disc layer did not succeed!");
   }
   associateSurfacesToLayer(*dLayer);
-  {
-     const auto &d_layer_surfaces = dLayer->surfaceArray()->surfaces();
-
-     for (auto& surface : d_layer_surfaces) {
-        uint64_t geo_id = surface->geometryId().value();
-        if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
-           std::cout <<  "KDTree Surface " << geo_id<< " " << static_cast<const void *>(surface)
-                     << std::tuple<const Acts::Surface&,
-                                   const Acts::GeometryContext&>(*surface,gctx)
-                                                                   << std::endl;
-        }
-     }
-  }
   // return the layer
   return dLayer;
 }
@@ -304,26 +265,6 @@ Acts::MutableLayerPtr Acts::LayerCreator::discLayer(
 
   double layerZ = protoLayer.medium(binZ);
   double layerThickness = protoLayer.range(binZ);
-
-  std::cout << "Creating a disk Layer:" << std::endl;
-  std::cout << " - at Z position    = " << layerZ << std::endl;
-  std::cout << " - from Z min/max   = " << protoLayer.min(binZ, false) << " / "
-            << protoLayer.max(binZ, false) << std::endl;
-  std::cout << " - with Z thickness = " << layerThickness << std::endl;
-  std::cout << "   - incl envelope  = " << protoLayer.envelope[binZ][0u]
-            << " / "
-            << protoLayer.envelope[binZ][1u]
-            << std::endl;
-  std::cout << " - with R min/max   = "
-            << protoLayer.min(binR, false) << " (-"
-            << protoLayer.envelope[binR][0u] << ") / "
-            << protoLayer.max(binR, false) << " (+"
-            << protoLayer.envelope[binR][1u] << ")"
-            << std::endl;
-  std::cout <<   " - with phi min/max = " << protoLayer.min(binPhi, false)
-            << " / "
-            << protoLayer.max(binPhi, false) << std::endl;
-  std::cout << " - # of modules     = " << surfaces.size() << std::endl;
 
   // adjust the layer radius
   ACTS_VERBOSE("Creating a disk Layer:");
@@ -371,19 +312,6 @@ Acts::MutableLayerPtr Acts::LayerCreator::discLayer(
     ACTS_ERROR("Creation of disc layer did not succeed!");
   }
   associateSurfacesToLayer(*dLayer);
-  {
-     const auto &d_layer_surfaces = dLayer->surfaceArray()->surfaces();
-
-     for (auto& surface : d_layer_surfaces) {
-        uint64_t geo_id = surface->geometryId().value();
-        if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
-           std::cout <<  "KDTree Surface " << geo_id<< " " << static_cast<const void *>(surface)
-                     << std::tuple<const Acts::Surface&,
-                                   const Acts::GeometryContext&>(*surface,gctx)
-                                                                   << std::endl;
-        }
-     }
-  }
   // return the layer
   return dLayer;
 }
@@ -464,19 +392,6 @@ Acts::MutableLayerPtr Acts::LayerCreator::planeLayer(
     ACTS_ERROR("Creation of plane layer did not succeed!");
   }
   associateSurfacesToLayer(*pLayer);
-  {
-     const auto &d_layer_surfaces = pLayer->surfaceArray()->surfaces();
-
-     for (auto& surface : d_layer_surfaces) {
-        uint64_t geo_id = surface->geometryId().value();
-        if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
-           std::cout <<  "KDTree Surface " << geo_id<< " " << static_cast<const void *>(surface)
-                     << std::tuple<const Acts::Surface&,
-                                   const Acts::GeometryContext&>(*surface,gctx)
-                                                                   << std::endl;
-        }
-     }
-  }
 
   // now return
   return pLayer;

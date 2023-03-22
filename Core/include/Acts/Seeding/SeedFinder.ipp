@@ -9,7 +9,6 @@
 #include <cmath>
 #include <numeric>
 #include <type_traits>
-#include <iostream>
 
 namespace Acts {
 
@@ -56,46 +55,10 @@ void SeedFinder<external_spacepoint_t, platform_t>::createSeedsForGroup(
   state.candidates_collector.setMaxElements(max_num_seeds_per_spm,
                                             max_num_quality_seeds_per_spm);
 
-  {
-     unsigned int counter=0;
-     for ([[maybe_unused]] auto spM : middleSPs) {
-        ++counter;
-     }
-     if (counter>0) std::cout << "DEBUG space points middle";
-     for ([[maybe_unused]] auto spM : middleSPs) {
-        std::cout << " " << spM->radius() << "," << spM->z();
-     }
-     if (counter>0) std::cout << std::endl;
-  }
-  {
-     unsigned int counter=0;
-     for ([[maybe_unused]] auto spM : topSPs) {
-        ++counter;
-     }
-     if (counter>0) std::cout << "DEBUG space points top";
-     for ([[maybe_unused]] auto spM : topSPs) {
-        std::cout << " " << spM->radius() << "," << spM->z();
-     }
-     if (counter>0) std::cout << std::endl;
-  }
-  {
-     unsigned int counter=0;
-     for ([[maybe_unused]] auto spM : bottomSPs) {
-        ++counter;
-     }
-     if (counter>0) std::cout << "DEBUG space points bottom";
-     for ([[maybe_unused]] auto spM : bottomSPs) {
-        std::cout << " " << spM->radius() << "," << spM->z();
-     }
-     if (counter>0) std::cout << std::endl;
-  }
-
   for (auto spM : middleSPs) {
     float rM = spM->radius();
     float zM = spM->z();
 
-    std::cout << "DEBUG middle space point " << rM << " in? ("  << rMiddleSPRange.min() << ", " << rMiddleSPRange.max() << ") "
-              <<", " << zM  << std::endl;
     // check if spM is outside our radial region of interest
     if (m_config.useVariableMiddleSPRange) {
       if (rM < rMiddleSPRange.min()) {
@@ -136,13 +99,10 @@ void SeedFinder<external_spacepoint_t, platform_t>::createSeedsForGroup(
         continue;
       }
     }
-    std::cout << "DEBUG middle space point accepted " << rM <<", " << zM  << std::endl;
 
     getCompatibleDoublets(options, topSPs, *spM, state.compatTopSP,
                           m_config.deltaRMinTopSP, m_config.deltaRMaxTopSP,
                           false);
-
-    std::cout << "DEBUG  getCompatibleDoublets " << state.compatTopSP.size()  << std::endl;
 
     // no top SP found -> try next spM
     if (state.compatTopSP.empty()) {
@@ -207,8 +167,7 @@ void SeedFinder<external_spacepoint_t, platform_t>::getCompatibleDoublets(
   for (auto otherSP : otherSPs) {
     const float rO = otherSP->radius();
     float deltaR = sign * (rO - rM);
-    std::cout << "DEBUG Test with other R " << rO << " delta " << deltaR << " in " << deltaRMinSP  << " .. " << deltaRMaxSP
-              << " ? " << ( deltaR >= deltaRMinSP && deltaR <= deltaRMaxSP) << std::endl;
+
     // if r-distance is too small, try next SP in bin
     if (deltaR < deltaRMinSP) {
       continue;
@@ -221,27 +180,18 @@ void SeedFinder<external_spacepoint_t, platform_t>::getCompatibleDoublets(
 
     const float zO = otherSP->z();
     float deltaZ = sign * (zO - zM);
-
-    std::cout << "DEBUG Test with other z  " << zO << " delta |" << deltaZ << "| < " << m_config.deltaZMax << std::endl;
-
     if (deltaZ > m_config.deltaZMax or deltaZ < -m_config.deltaZMax) {
       continue;
     }
 
     // ratio Z/R (forward angle) of space point duplet
     float cotTheta = deltaZ / deltaR;
-    std::cout << "DEBUG Test with other dZ/dR |" << cotTheta << "| < " << m_config.cotThetaMax << std::endl;
-
     if (cotTheta > m_config.cotThetaMax or cotTheta < -m_config.cotThetaMax) {
       continue;
     }
 
     // check if duplet origin on z axis within collision region
     float zOrigin = zM - rM * cotTheta;
-
-    std::cout << "DEBUG Test with other zOrigin |" << zOrigin << " in " << m_config.collisionRegionMin << " .. "
-              << m_config.collisionRegionMax << std::endl;
-
     if (zOrigin < m_config.collisionRegionMin ||
         zOrigin > m_config.collisionRegionMax) {
       continue;
@@ -257,12 +207,7 @@ void SeedFinder<external_spacepoint_t, platform_t>::getCompatibleDoublets(
     const float yVal =
         (otherSP->y() - yM) * ratio_xM_rM - (otherSP->x() - xM) * ratio_yM_rM;
 
-
-    std::cout << "DEBUG Test x,y : " << std::abs(rM * yVal) << " >? "
-              <<  (sign * m_config.impactMax * xVal) << std::endl;
-
     if (std::abs(rM * yVal) <= sign * m_config.impactMax * xVal) {
-      std::cout << "DEBUG accepted " << std::endl;
       outVec.push_back(otherSP);
       continue;
     }
@@ -288,15 +233,9 @@ void SeedFinder<external_spacepoint_t, platform_t>::getCompatibleDoublets(
     // the distance of the straight line from the origin (radius of the
     // circle) is related to aCoef and bCoef by d^2 = bCoef^2 / (1 +
     // aCoef^2) = 1 / (radius^2) and we can apply the cut on the curvature
-
-    std::cout << "DEBUG Test conformal  " 
-              << ((bCoef * bCoef) * options.minHelixDiameter2) << " <= " <<  (1 + aCoef * aCoef)
-              << std::endl;
-
     if ((bCoef * bCoef) * options.minHelixDiameter2 > (1 + aCoef * aCoef)) {
       continue;
     }
-    std::cout << "DEBUG accepted " << std::endl;
     outVec.push_back(otherSP);
   }
 }

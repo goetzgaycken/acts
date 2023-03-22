@@ -17,14 +17,12 @@
 
 #include <memory>
 #include <vector>
-#include <iostream>
 
 #include <boost/container/small_vector.hpp>
 
 namespace Acts {
 
 using NeighborhoodVector = boost::container::small_vector<size_t, 10>;
-
 
 /// Iterates over the elements of all bins given
 /// by the indices parameter in the given SpacePointGrid.
@@ -135,7 +133,7 @@ class Neighborhood {
   }
   NeighborhoodIterator<external_spacepoint_t> end() {
     return NeighborhoodIterator<external_spacepoint_t>(
-        m_indices, m_spgrid, m_indices.size()-1,
+        m_indices, m_spgrid, m_indices.size() - 1,
         std::end(m_spgrid->at(m_indices.back())));
   }
 
@@ -150,9 +148,6 @@ template <typename external_spacepoint_t>
 class BinnedSPGroupIterator {
  public:
   BinnedSPGroupIterator& operator++() {
-     std::cout << "DEBUG BinnedSPGroupIterator& operator++ z_i=" << zIndex <<  " <? " << phiZbins[1]
-               << " phi_i=" << phiIndex << " <? " << phiZbins[0]
-               << std::endl;
     if (zIndex < phiZbins[1]) {
       zIndex++;
     } else {
@@ -179,8 +174,6 @@ class BinnedSPGroupIterator {
     zIndex = phiZbins[1] + 1;
     return *this;
   }
-
-
 
   bool operator==(const BinnedSPGroupIterator& otherState) {
     return (zIndex == otherState.zIndex && phiIndex == otherState.phiIndex);

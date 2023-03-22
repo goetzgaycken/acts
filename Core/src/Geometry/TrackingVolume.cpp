@@ -404,25 +404,6 @@ void Acts::TrackingVolume::closeGeometry(
     }
   }
 
-
-  {
-    Acts::GeometryContext geo_ctx;
-    this->visitSurfaces([this, &geo_ctx](const Acts::Surface* surface) {
-          if (surface != nullptr) {
-             uint64_t geo_id = surface->geometryId().value();
-             if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
-                std::cout <<  "TG-b " << this->volumeName()
-                          << " " << geo_id<< " " << static_cast<const void *>(surface) << std::endl;
-                std::cout <<  "TG-b "
-                          << " Surface " << geo_id<< " " << static_cast<const void *>(surface)
-                          << std::tuple<const Acts::Surface&,
-                                        const Acts::GeometryContext&>(*surface,geo_ctx)
-                                                                        << std::endl;
-             }
-          }
-       });
-  }
-
   // A) this is NOT a container volume, volumeID is already incremented
   if (!m_confinedVolumes) {
     // loop over the confined layers
@@ -450,10 +431,6 @@ void Acts::TrackingVolume::closeGeometry(
             Surface* mutableSurfcePtr = const_cast<Surface*>(&srf);
             auto geoID = GeometryIdentifier(volumeID).setSensitive(++isurface);
             mutableSurfcePtr->assignGeometryId(geoID);
-            if (geoID == 1441152705392644352 || geoID == 1441152705392645120) {
-               std::cout << this->volumeName() << " new surface " << geoID << " " << static_cast<const void *>(mutableSurfcePtr)
-                         << std::endl;
-            }
           }
         }
       }
@@ -469,30 +446,6 @@ void Acts::TrackingVolume::closeGeometry(
                                         logger);
     }
   }
-
-  {
-    Acts::GeometryContext geo_ctx;
-    this->visitSurfaces([this, &geo_ctx](const Acts::Surface* surface) {
-          if (surface != nullptr) {
-             uint64_t geo_id = surface->geometryId().value();
-             if (geo_id == 1441152705392644352 || geo_id == 1441152705392645120) {
-                std::cout <<  "TG-m " << this->volumeName()
-                          << " " << geo_id<< " " << static_cast<const void *>(surface)
-                          << ( !m_confinedVolumes
-                               ? (m_confinedLayers 
-                                  ? "(confined layers)"
-                                  : (m_bvhTop ? "(BVH)" : ""))
-                               : "(confined volumes)") << std::endl;
-                std::cout <<  "TG-m "
-                          << " Surface " << geo_id<< " " << static_cast<const void *>(surface)
-                          << std::tuple<const Acts::Surface&,
-                                        const Acts::GeometryContext&>(*surface,geo_ctx)
-                                                                        << std::endl;
-             }
-          }
-       });
-  }
-
 
   if (!m_confinedDenseVolumes.empty()) {
     for (auto& volumesIter : m_confinedDenseVolumes) {
