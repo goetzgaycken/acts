@@ -579,16 +579,18 @@ namespace {
                        const ActsExamples::SimParticleContainer &particles,
                        const ActsExamples::IndexMultimap<ActsFatras::Barcode> &hitParticlesMap,
                        const Acts::TrackingGeometry &tracking_geometry,
-                       const Acts::GeometryContext & gctx,
+                       const ActsExamples::AlgorithmContext &ctx,
                        const ActsExamples::MeasurementContainer &measurements,
                        const Acts::VectorMultiTrajectory &trajectory,
                        Acts::MultiTrajectoryTraits::IndexType trackTip
                        ) {
+      const Acts::GeometryContext & gctx = ctx.geoContext;
       std::cout << "TRAJECTORY ";
       auto particle_iter = particles.find(max_barcode);
       if (particle_iter != particles.end()) {
          Acts::Vector3 direction(particle_iter->unitDirection());
-         std::cout << particle_iter->pdg() << " " << max_barcode.value()
+         std::cout << particle_iter->pdg()
+                   << " " << ((( ctx.eventNumber&0xffffffff) << 32) + max_barcode.value() )
                    << " " << particle_iter->transverseMomentum()
                    << " " << direction[0]
                    << " " << direction[1]
@@ -696,12 +698,13 @@ namespace {
                                              Acts::Vector2{local0, 0.} };
    }
 
-   void dumpParicleHits(std::map<ActsFatras::Barcode, std::vector<ActsExamples::Index> > particleToHit,
-                        const ActsExamples::SimParticleContainer &particles,
-                        const ActsExamples::IndexMultimap<ActsFatras::Barcode> &hitParticlesMap,
-                        const Acts::TrackingGeometry &tracking_geometry,
-                        const Acts::GeometryContext & gctx,
-                        const ActsExamples::MeasurementContainer &measurements) {
+   void dumpParticleHits(std::map<ActsFatras::Barcode, std::vector<ActsExamples::Index> > particleToHit,
+                         const ActsExamples::SimParticleContainer &particles,
+                         const ActsExamples::IndexMultimap<ActsFatras::Barcode> &hitParticlesMap,
+                         const Acts::TrackingGeometry &tracking_geometry,
+                         const ActsExamples::AlgorithmContext &ctx,
+                         const ActsExamples::MeasurementContainer &measurements) {
+      const Acts::GeometryContext & gctx = ctx.geoContext;
       for (const std::pair< const ActsFatras::Barcode, std::vector<ActsExamples::Index> > &particle_hits : particleToHit) {
          ActsFatras::Barcode the_barcode = particle_hits.first;
          const std::vector<ActsExamples::Index> &the_hits  = particle_hits.second;
@@ -710,14 +713,14 @@ namespace {
          auto particle_iter = particles.find(the_barcode);
          if (particle_iter != particles.end()) {
             Acts::Vector3 direction(particle_iter->unitDirection());
-            std::cout << particle_iter->pdg() << " " << the_barcode.value()
+            std::cout << particle_iter->pdg() << " " << ((( ctx.eventNumber&0xffffffff) << 32) + the_barcode.value())
                       << " " << particle_iter->transverseMomentum()
                       << " " << direction[0]
                       << " " << direction[1]
                       << " " << direction[2];
          }
          else {
-            std::cout << "0" <<  " " << the_barcode.value()
+            std::cout << "0" <<  " " << ((( ctx.eventNumber&0xffffffff) << 32) + the_barcode.value())
                       << " " << "0."
                       << " " << "0."
                       << " " << "0."
@@ -959,12 +962,12 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
   unsigned int plot_i=0;
   std::set<unsigned int> visualised;
 
-  dumpParicleHits(particleToHit,
-                  particles,
-                  hitParticlesMap,
-                  *(m_cfg.trackingGeometry),
-                  ctx.geoContext,
-                  measurements);
+  dumpParticleHits(particleToHit,
+                   particles,
+                   hitParticlesMap,
+                   *(m_cfg.trackingGeometry),
+                   ctx,
+                   measurements);
 
   static unsigned int debug_counter=0;
   // Loop over all trajectories
@@ -1121,7 +1124,7 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
                       particles,
                       hitParticlesMap,
                       *(m_cfg.trackingGeometry),
-                      ctx.geoContext,
+                      ctx,
                       measurements,
                       traj.multiTrajectory(),
                       trackTip );
@@ -1205,7 +1208,8 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
            Acts::Vector3 pos_b( globalCoords(*tg, geo_ctx,measurements.at(hit_b)) );
            return Acts::VectorHelpers::perp(pos_a) < Acts::VectorHelpers::perp(pos_b);
         });
-     std::cout << "PART " << a_particle.pdg()
+     std::cout << "TRUTHPART " << a_particle.pdg()
+               << " " << ((( ctx.eventNumber&0xffffffff) << 32) + a_particle.particleId().value())
                << " " << a_particle.transverseMomentum();
      Acts::Vector3 direction(a_particle.unitDirection());
      for (unsigned int coord_i=0; coord_i<3; ++coord_i) {
@@ -1213,10 +1217,12 @@ ActsExamples::ProcessCode ActsExamples::CKFPerformanceWriter::writeT(
      }
      std::cout << " " << hits.size();
      for (const Index &hit_i : hits) {
+        std::cout << " -1 ";
         Acts::Vector3 pos_a( globalCoords(*tg, geo_ctx,measurements.at(hit_i)) );
         for (unsigned int coord_i=0; coord_i<3; ++coord_i) {
            std::cout << " " << pos_a[coord_i];
         }
+        std::cout << " 0 ";
      }
      std::cout << std::endl;
   }

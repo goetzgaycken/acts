@@ -273,8 +273,8 @@ void dumpSPs(const Acts::SpacePointGrid<ActsExamples::SimSpacePoint> &grid,
 
    // dummy truth
    std::cout << prefix
-             << 1  // PDG ID
-             << " " << 1  // barcode
+             << 0  // PDG ID
+             << " " << ( (ctx ? (ctx->eventNumber&0xffffffff) : 0ul) << 32)  // barcode
              << " " << 1. // pt
              << " " << 0. << " " << 0. << " " << 0.; // direction
 
@@ -415,7 +415,7 @@ ActsExamples::ProcessCode ActsExamples::SeedingAlgorithm::execute(
   std::vector<const SimSpacePoint*> spacePointPtrs;
   spacePointPtrs.reserve(nSpacePoints);
   unsigned int in_idx=0;
-  std::cout << "SEEDINPART 0 " << in_idx << "0. 0. 0. 0. " << nSpacePoints << " ";
+  std::cout << "SEEDINPART 0 " << ((( ctx.eventNumber&0xffffffff) << 32) + in_idx) << "0. 0. 0. 0. " << nSpacePoints << " ";
   for (const auto& isp : m_cfg.inputSpacePoints) {
     for (const auto& spacePoint :
          ctx.eventStore.get<SimSpacePointContainer>(isp)) {

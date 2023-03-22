@@ -733,7 +733,7 @@ public:
 
      std::map<int, ActsFatras::Barcode> convertParticles(const AlgorithmContext& ctx);
      void convertMeasurements(const AlgorithmContext& ctx, const std::map<int, ActsFatras::Barcode> &barcode_map);
-     void dumpParticleHits(const Acts::GeometryContext& gctx,
+     void dumpParticleHits(const ActsExamples::AlgorithmContext& ctx,
                            const Acts::TrackingGeometry &trackingGeometry,
                            std::unordered_map<unsigned long, Acts::GeometryIdentifier> &geo_map) const;
 

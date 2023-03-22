@@ -1536,9 +1536,10 @@ namespace {
    }
 }
 
-void ActsExamples::RootDigiReader::dumpParticleHits(const Acts::GeometryContext& gctx,
+void ActsExamples::RootDigiReader::dumpParticleHits(const ActsExamples::AlgorithmContext& ctx,
                                                     const Acts::TrackingGeometry &trackingGeometry,
                                                     std::unordered_map<unsigned long, Acts::GeometryIdentifier> &geo_map) const {
+   const Acts::GeometryContext& gctx = ctx.geoContext;
    std::map<int, unsigned int> barcodeToParticle;
    std::map<unsigned int, std::vector<std::pair<unsigned int, unsigned int> > > particleToHit;
    std::vector< std::pair<float, unsigned int> > particle_order;
@@ -1585,15 +1586,12 @@ void ActsExamples::RootDigiReader::dumpParticleHits(const Acts::GeometryContext&
       const std::vector<std::pair<unsigned int, unsigned int> > &particle_hits = particleToHit[ part_i ];
       if (particle_hits.size()>0) {
          std::cout << "ORIGPART " << m_truthParticles.pdgId.at(part_i)
-                   << " " << m_truthParticles.barcode.at(part_i)
+                   << " " << ((( ctx.eventNumber&0xffffffff) << 32) + m_truthParticles.barcode.at(part_i))
                    << " " << sqrt(part_idx.first)
                    << " " << m_truthParticles.px.at(part_i)*norm_scale
                    << " " << m_truthParticles.py.at(part_i)*norm_scale
                    << " " << m_truthParticles.pz.at(part_i)*norm_scale
                    << " " << particle_hits.size();
-
-
-
 
          for (const std::pair<unsigned int, unsigned int> &container_meas : particle_hits) {
             std::set<int> contributions;
@@ -1930,7 +1928,7 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
               try {
                  ActsFatras::Barcode particle_id = findParticleBarCode(barcode_map, sim_barcode);
                  std::pair<HitParticlesMap::const_iterator, HitParticlesMap::const_iterator>
-                    particle_range = measurementParticlesMap.equal_range(meas_i);
+                    particle_range = measurementParticlesMap.equal_range(measurementIdx);
                  for (auto hitParticle : makeRange(particle_range)) {
                     if (hitParticle.second == particle_id) {
                        has_barcode = true;
@@ -2020,7 +2018,7 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
   }
 
 
-  dumpParticleHits(ctx.geoContext,
+  dumpParticleHits(ctx,
                    *(m_cfg.trackingGeometry),
                    geo_map);
 
