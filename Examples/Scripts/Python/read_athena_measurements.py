@@ -52,7 +52,7 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
 
     # s = acts.examples.Sequencer(events=1, numThreads=-1, outputDir=str(outputDir))
     s = acts.examples.Sequencer(
-        events=int(os.environ.get("NEVENTS", 10)), numThreads=1,
+        events=int(os.environ.get("NEVENTS", 100)), numThreads=1,
         outputDir=str(outputDir),
     )
 
