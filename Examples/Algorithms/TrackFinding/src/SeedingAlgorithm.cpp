@@ -500,7 +500,7 @@ ActsExamples::ProcessCode ActsExamples::SeedingAlgorithm::execute(
          }
      }
 
-     std::cout << "SEEDOUT 0 " << in_idx << " 0. 0. 0. 0. " << n_surf << " ";
+     std::cout << "SEEDOUT 0 " << ((( ctx.eventNumber&0xffffffff) << 32) + in_idx) << " 0. 0. 0. 0. " << n_surf << " ";
      for (const auto& spacePoint : seed.sp()) {
         // since the event store owns the space points, their pointers should be
         // stable and we do not need to create local copies.
