@@ -34,12 +34,14 @@ public:
       Acts::Logging::Level toolLogLevel = Acts::Logging::INFO;
       /// Logging level
       Acts::Logging::Level logLevel = Acts::Logging::INFO;
-
-      std::string geantinoInputFileName;
-      uint64_t maxGeantinoEntries;
-      bool stop = false;
    };
-   TrackingGeometryJsonReader(const Config& cfg)  : m_cfg(cfg) {}
+   TrackingGeometryJsonReader(
+       const Config& cfg,
+       std::unique_ptr<const Acts::Logger> logger = std::unique_ptr<const Acts::Logger>{}) : m_cfg(cfg) {
+       if (!logger) {
+          logger = Acts::getDefaultLogger("TrackingGeometryJsonReader", m_cfg.logLevel);
+       }
+   }
 
    std::shared_ptr<const Acts::TrackingGeometry> read(const std::string &file_name,
                                                       std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const;
@@ -47,35 +49,41 @@ public:
                                                                         std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const;
 
 protected:
-   Config m_cfg;
+   /// Private access to the logger
+   const Acts::Logger& logger() const { return *m_logger; }
 
+   /// Create a proto detector using the list of volumes described by the json object
+   /// @param tracking_geometry_description the json object created by e.g. the tracking geometry writer
+   /// @param surfaces the list of all surfaces described by the given json
+   /// @param surfaces_per_volume surface indices per volume
+   /// @return the proto detector
    Acts::ProtoDetector createProtoDetector(const nlohmann::json& tracking_geometry_description,
                                            const std::vector<std::shared_ptr<Acts::Surface>> &surfaces,
                                            const std::vector< std::vector< unsigned int >> &surfaces_per_volume) const;
+
+   /// Create surfaces using the list of surfaces described by the json object
+   /// @param tracking_geometry_description the json object created by e.g. the tracking geometry writer
+   /// @return surface list, surfaces indices per volume, and list of associated detector elements
    std::tuple<std::vector<std::shared_ptr<Acts::Surface>>,
               std::vector< std::vector< unsigned int >>,
               std::vector<std::unique_ptr<DetectorElementBase>> >
       createSurfaces(const nlohmann::json& tracking_geometry_description) const;
 
-   template <typename enum_t, class array_t>
-   static enum_t getNamedEnum(const array_t &enum_names, const std::string &the_name, const std::string &error_head="Unknwon enum: ") {
-      assert( enum_names.size() < std::numeric_limits<unsigned short>::max());
-      typename array_t::const_iterator
-         enum_iter = std::find(enum_names.begin(), enum_names.end(), the_name);
-      if ( enum_iter == enum_names.end()) {
-         throw std::runtime_error(error_head+the_name);
-      }
-      return static_cast<enum_t>(enum_iter - enum_names.begin());
-   }
+   Config m_cfg;
+
+   /// Logging instance
+   std::unique_ptr<const Acts::Logger> m_logger;
 
    static float scale(float a, float b) {
       float tmp=std::abs(a+b);
       return tmp == 0. ? 2. : tmp;
    }
+   /// Test whether two floats agree to very high precision
    static bool floatsAgree(float a, float b) {
       return std::abs(a-b) < std::numeric_limits<float>::epsilon() * scale(a,b);
    }
 
+   /// Helper class which describes a volume
    struct VolumeInfo {
       VolumeInfo(const std::string a_name, unsigned int an_id=std::numeric_limits<unsigned int>::max())
          : id(an_id) {proto_volume.name=a_name; }
@@ -113,8 +121,6 @@ protected:
       enum EDomainTypes { eR, eZ, eNDomains};
       std::array<Domain, eNDomains> domains;
 
-      // @TODO remove :
-      enum EBinningVariable {kR, kPhi, kZ, kNBinningVariables};
       /// helper class to hold binning description
       struct Binning {
          enum EType {kOpen, kClosed, kNRangeTypes};
@@ -137,23 +143,22 @@ protected:
          bool operator!=(const Binning &a_binning) const {
             return not operator==(a_binning);
          }
-         static float scale(float a, float b) {
-            float tmp=std::abs(a+b);
-            return tmp == 0. ? 2. : tmp;
-         }
          bool overlaps(const Binning &a_binning) const {
             return min < a_binning.max && max > a_binning.min;
          }
       };
-      std::array<Binning, kNBinningVariables> binning {};
-      //  remove until here
 
-      unsigned short setDomainMask = 0;
-      unsigned short noOverlapMask = 0;
+      unsigned short setDomainMask = 0; // specifies for a volume which of the domains (R,Z) are specified.
+      unsigned short noOverlapMask = 0; // specifies in which domain the child volumes do not overlap.
 
       bool processed = false;
    };
 
+   /// helper method to register a new volume and link its child volumes.
+   /// @param volume_id the volume id
+   /// @param name the volume name
+   /// @param volume_name_map associative container for the volume information where the key is the volume id
+   /// @param name_map inverse map which maps a volume name to its id.
    static VolumeInfo &registerVolume(unsigned int volume_id,
                                      const std::string &name,
                                      std::unordered_map<unsigned int, VolumeInfo > &volume_name_map,
