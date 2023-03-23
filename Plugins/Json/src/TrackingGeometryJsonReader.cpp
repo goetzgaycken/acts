@@ -226,7 +226,7 @@ namespace {
                      std::cout << ") ";
                   }
                   std::cout << " type:" << (elm.internal.has_value()
-                                            ? a_child->internal.value().layerType : Acts::Surface::Other ) << std::endl;
+                                            ? elm.internal.value().layerType : Acts::Surface::Other ) << std::endl;
                   std::cout << "| " << elm.extent.toString("|   ") << std::endl;
                   childs.push_back( &elm );
                }
