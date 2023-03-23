@@ -12,6 +12,7 @@
 #include "Acts/Plugins/Json/MaterialMapJsonConverter.hpp"
 #include "Acts/Plugins/Json/ProtoDetectorJsonConverter.hpp"
 #include "Acts/Plugins/Json/TrackingGeometryJsonReader.hpp"
+#include "Acts/Plugins/Json/TrackingGeometryJsonWriter.hpp"
 #include "Acts/Plugins/Python/Utilities.hpp"
 #include "ActsExamples/Io/Json/JsonMaterialWriter.hpp"
 #include "ActsExamples/Io/Json/JsonSurfacesWriter.hpp"
@@ -149,6 +150,31 @@ void addJson(Context& ctx) {
     ACTS_PYTHON_STRUCT_BEGIN(c, TrackingGeometryJsonReader::Config);
     ACTS_PYTHON_MEMBER(detectorName);
     ACTS_PYTHON_MEMBER(toolLogLevel);
+    ACTS_PYTHON_MEMBER(logLevel);
+    ACTS_PYTHON_STRUCT_END();
+  }
+
+  {
+    auto cls =
+        py::class_<TrackingGeometryJsonWriter>(mex, "TrackingGeometryJsonWriter")
+       .def(py::init<const TrackingGeometryJsonWriter::Config&>(),
+                 py::arg("config"))
+       .def("write", &TrackingGeometryJsonWriter::write)
+       .def("writeNominal", &TrackingGeometryJsonWriter::writeNominal);
+       //            .def_property_readonly("config", &TrackingGeometryJsonReader::m_cfg);
+
+    auto c =
+        py::class_<TrackingGeometryJsonWriter::Config>(cls, "Config").def(py::init<>());
+
+    ACTS_PYTHON_STRUCT_BEGIN(c, TrackingGeometryJsonWriter::Config);
+    ACTS_PYTHON_MEMBER(context);
+    ACTS_PYTHON_MEMBER(processSensitives);
+    ACTS_PYTHON_MEMBER(processApproaches);
+    ACTS_PYTHON_MEMBER(processRepresenting);
+    ACTS_PYTHON_MEMBER(processBoundaries);
+    ACTS_PYTHON_MEMBER(processVolumes);
+    ACTS_PYTHON_MEMBER(processDenseVolumes);
+    ACTS_PYTHON_MEMBER(processNonMaterial);
     ACTS_PYTHON_MEMBER(logLevel);
     ACTS_PYTHON_STRUCT_END();
   }

@@ -11,6 +11,7 @@
 #include "Acts/Surfaces/RadialBounds.hpp"
 #include "Acts/Surfaces/RectangleBounds.hpp"
 
+#include "Core/include/Acts/Geometry/IdentifiableDetectorElement.hpp"
 #include "Acts/Plugins/Json/TrackingGeometryJsonReader.hpp"
 #include "Acts/Plugins/Json/VolumeBoundsJsonConverter.hpp"
 #include "Acts/Plugins/Json/AlgebraJsonConverter.hpp"
@@ -38,47 +39,6 @@
 
 // dump geom
 #include <deque>
-
-namespace Test {
-
-   /// @brief Detector element with an ID.
-   /// Simple detector element which is associated to surfaces and just provides a detector element ID.
-   class IdentifiableDetectorElement : public Acts::DetectorElementBase
-   {
-   public:
-      /// constructor
-      /// @param surface pointer to the surface which represents the detector element (not owned by this detector element).
-      /// @param detector_element_id the ID of the detector element
-      /// @param thickness the thickness of the detector element.
-      /// Create a detector element which provides in addition to the surface properties a
-      /// detector element ID. This will not associate this detector element to the surface.
-      /// This detector element will not take over the ownership over the surface.
-      IdentifiableDetectorElement(const Acts::Surface *surface, uint64_t detector_element_id, float thickness)
-        : m_surface(surface),
-          m_transform( surface->transform(Acts::GeometryContext()) ),
-          m_id(detector_element_id),
-          m_thickness(thickness)
-      {}
-
-      /// @param gctx The current geometry context object, e.g. alignment
-      const Acts::Transform3& transform([[maybe_unused]] const Acts::GeometryContext& gctx) const override
-        { return m_transform; }
-      /// Return surface representation
-      const Acts::Surface& surface() const override
-        { return *m_surface; }
-
-      double thickness() const override { return m_thickness; }
-
-      /// The ID of this detector element.
-      uint64_t detectorId() const { return m_id; }
-   private:
-      const Acts::Surface *m_surface;
-      Acts::Transform3 m_transform;
-      uint64_t m_id;
-      float m_thickness;
-   };
-}
-using namespace Test;
 
 namespace {
 
@@ -864,7 +824,7 @@ TrackingGeometryJsonReader::createSurfaces(
 
          if (a_surface["value"].contains("detID") ) {
             uint64_t det_id = a_surface["value"]["detID"].get<uint64_t>();
-            std::get<1>(surfaces_out).push_back(std::make_unique<::Test::IdentifiableDetectorElement>( surface_ptr.get(), det_id, 0.f));
+            std::get<1>(surfaces_out).push_back(std::make_unique<Acts::IdentifiableDetectorElement>( *surface_ptr, det_id, 0.f));
             surface_ptr->associateDetectorElement( std::get<1>(surfaces_out).back().get() );
          }
          if (a_surface.contains("sensitive")) {

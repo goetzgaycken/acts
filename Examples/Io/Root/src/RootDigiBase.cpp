@@ -7,6 +7,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 #include "Acts/Surfaces/AnnulusBounds.hpp"
 #include "Acts/Surfaces/PlanarBounds.hpp"
+#include "Acts/Geometry/IdentifiableDetectorElement.hpp"
 
 #include "ActsExamples/Io/Root/RootDigiBase.hpp"
 
@@ -38,40 +39,6 @@ using HitParticlesMap = IndexMultimap<ActsFatras::Barcode>;
 #include "TH2F.h"
 
 //#define DEBUG_READ 1
-
-
-namespace Test {
-   class IdentifiableDetectorElement : public Acts::DetectorElementBase
-   {
-   public:
-      IdentifiableDetectorElement(const Acts::Surface *surface, uint64_t detector_element_id, float thickness)
-        : m_surface(surface),
-          m_transform( surface->transform(Acts::GeometryContext()) ),
-          m_id(detector_element_id),
-          m_thickness(thickness)
-      {}
-
-      ~IdentifiableDetectorElement() {
-         //         std::cout << "IdentifiableDetectorElement::dtor " << m_id << std::endl;
-      }
-
-      /// @param gctx The current geometry context object, e.g. alignment
-      const Acts::Transform3& transform([[maybe_unused]] const Acts::GeometryContext& gctx) const override
-        { return m_transform; }
-      /// Return surface representation
-      const Acts::Surface& surface() const override
-        { return *m_surface; }
-
-      double thickness() const override { return m_thickness; }
-
-      uint64_t detectorId() const { return m_id; }
-   private:
-      const Acts::Surface *m_surface;
-      Acts::Transform3 m_transform;
-      uint64_t m_id;
-      float m_thickness;
-   };
-}
 
 namespace {
    inline double sqr(double a) { return a*a; }
@@ -1677,8 +1644,8 @@ void ActsExamples::RootDigiReader::convertMeasurements(const AlgorithmContext& c
   const Acts::TrackingGeometry *tg=m_cfg.trackingGeometry.get();
   m_cfg.trackingGeometry->visitSurfaces([&geo_map,&ctx, tg](const Acts::Surface* surface) {
         if (surface && surface->associatedDetectorElement()) {
-           const Test::IdentifiableDetectorElement *
-              det_element=dynamic_cast<const Test::IdentifiableDetectorElement *>(surface->associatedDetectorElement());
+           const Acts::IdentifiableDetectorElement *
+              det_element=dynamic_cast<const Acts::IdentifiableDetectorElement *>(surface->associatedDetectorElement());
            if (det_element) {
               std::pair<std::unordered_map<unsigned long, Acts::GeometryIdentifier>::iterator, bool>
                  insert_result =  geo_map.insert( std::make_pair( det_element->detectorId(), surface->geometryId()) );

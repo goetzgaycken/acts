@@ -13,7 +13,8 @@ add_library(
   src/UtilitiesJsonConverter.cpp
   src/VolumeBoundsJsonConverter.cpp
   src/VolumeJsonConverter.cpp
-  src/TrackingGeometryJsonReader.cpp)
+  src/TrackingGeometryJsonReader.cpp
+  src/TrackingGeometryJsonWriter.cpp)
 target_include_directories(
   ActsPluginJson
   PUBLIC
