@@ -19,10 +19,10 @@
 #include <limits>
 #include <stdexcept>
 
-
 namespace Acts {
    class IMaterialDecorator;
 
+/// Helper to read a tracking geometry from a json object or file.
 class TrackingGeometryJsonReader
 {
 public:
@@ -35,16 +35,33 @@ public:
       /// Logging level
       Acts::Logging::Level logLevel = Acts::Logging::INFO;
    };
+
+   /// Constructor of the tracking geometry json reader.
+   /// @param cfg configuration object to set logging levels for the builders and the detector name.
+   /// @param logger an optional external logger to replace the default logger.
    TrackingGeometryJsonReader(
        const Config& cfg,
-       std::unique_ptr<const Acts::Logger> logger = std::unique_ptr<const Acts::Logger>{}) : m_cfg(cfg) {
-       if (!logger) {
-          logger = Acts::getDefaultLogger("TrackingGeometryJsonReader", m_cfg.logLevel);
-       }
+       std::unique_ptr<const Acts::Logger> logger = std::unique_ptr<const Acts::Logger>{}) :
+          m_cfg(cfg),
+          m_logger(std::move(logger))
+   {
+      if (!m_logger) {
+         m_logger = std::move( Acts::getDefaultLogger("TrackingGeometryJsonReader", m_cfg.logLevel) );
+      }
    }
 
-   std::shared_ptr<const Acts::TrackingGeometry> read(const std::string &file_name,
-                                                      std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const;
+   /// Read a tracking geometry described by the given json file.
+   /// @param file_name name of the json file which describes the tracking geometry
+   /// @param mdecorator an invalid pointer or a decorator to override the material description inside the json file
+   /// @return the tracking geometry.
+   std::shared_ptr<const Acts::TrackingGeometry> read(
+       const std::string &file_name,
+       std::shared_ptr<const Acts::IMaterialDecorator> mdecorator = std::shared_ptr<const Acts::IMaterialDecorator>()) const;
+
+   /// Create a tracking geometry described by the given json object.
+   /// @param tracking_geometry_description the json object which describes the tracking geometry
+   /// @param mdecorator an invalid pointer or a decorator to override the material description inside the json file
+   /// @return the tracking geometry.
    std::shared_ptr<const Acts::TrackingGeometry> createTrackingGeometry(const nlohmann::json& tracking_geometry_description,
                                                                         std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const;
 
@@ -54,20 +71,17 @@ protected:
 
    /// Create a proto detector using the list of volumes described by the json object
    /// @param tracking_geometry_description the json object created by e.g. the tracking geometry writer
-   /// @param surfaces the list of all surfaces described by the given json
-   /// @param surfaces_per_volume surface indices per volume
    /// @return the proto detector
-   Acts::ProtoDetector createProtoDetector(const nlohmann::json& tracking_geometry_description,
-                                           const std::vector<std::shared_ptr<Acts::Surface>> &surfaces,
-                                           const std::vector< std::vector< unsigned int >> &surfaces_per_volume) const;
+   Acts::ProtoDetector createProtoDetector(const nlohmann::json& tracking_geometry_description) const;
 
    /// Create surfaces using the list of surfaces described by the json object
    /// @param tracking_geometry_description the json object created by e.g. the tracking geometry writer
-   /// @return surface list, surfaces indices per volume, and list of associated detector elements
+   /// @param ignore_material if true the material description in the json object is ignored
+   /// @return surface list, and list of associated detector elements
    std::tuple<std::vector<std::shared_ptr<Acts::Surface>>,
-              std::vector< std::vector< unsigned int >>,
               std::vector<std::unique_ptr<DetectorElementBase>> >
-      createSurfaces(const nlohmann::json& tracking_geometry_description) const;
+      createSurfaces(const nlohmann::json& tracking_geometry_description,
+                     bool ignore_material) const;
 
    Config m_cfg;
 
@@ -91,7 +105,7 @@ protected:
       Acts::ProtoVolume proto_volume;
       /// the external volume id
       unsigned int id;
-      /// child indices or empty if no child volumes
+      /// child indexes or empty if no child volumes
       std::vector<unsigned int> childs;
       /// parent index or UINT_MAX
       unsigned int parent = std::numeric_limits<unsigned int>::max();

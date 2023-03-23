@@ -40,9 +40,19 @@
 #include <deque>
 
 namespace Test {
+
+   /// @brief Detector element with an ID.
+   /// Simple detector element which is associated to surfaces and just provides a detector element ID.
    class IdentifiableDetectorElement : public Acts::DetectorElementBase
    {
    public:
+      /// constructor
+      /// @param surface pointer to the surface which represents the detector element (not owned by this detector element).
+      /// @param detector_element_id the ID of the detector element
+      /// @param thickness the thickness of the detector element.
+      /// Create a detector element which provides in addition to the surface properties a
+      /// detector element ID. This will not associate this detector element to the surface.
+      /// This detector element will not take over the ownership over the surface.
       IdentifiableDetectorElement(const Acts::Surface *surface, uint64_t detector_element_id, float thickness)
         : m_surface(surface),
           m_transform( surface->transform(Acts::GeometryContext()) ),
@@ -59,6 +69,7 @@ namespace Test {
 
       double thickness() const override { return m_thickness; }
 
+      /// The ID of this detector element.
       uint64_t detectorId() const { return m_id; }
    private:
       const Acts::Surface *m_surface;
@@ -71,6 +82,7 @@ using namespace Test;
 
 namespace {
 
+   /// Derived tracking geometry object which provides storage for detector elements.
    class TrackingGeometryWithDetectorElements : public Acts::TrackingGeometry {
    public:
       TrackingGeometryWithDetectorElements(const Acts::MutableTrackingVolumePtr& highestVolume,
@@ -85,7 +97,6 @@ namespace {
    };
 
 
-   inline double sqr(double a) { return a*a; }
    class Stat {
    public:
       Stat() = default;
@@ -389,9 +400,7 @@ std::shared_ptr<const Acts::TrackingGeometry>
 }
 
 Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
- const nlohmann::json& tracking_geometry_description,
- const std::vector<std::shared_ptr<Acts::Surface>> &surfaces,
- const std::vector< std::vector< unsigned int >> &surfaces_per_volume) const {
+ const nlohmann::json& tracking_geometry_description) const {
 
    Acts::GeometryContext gctx;
 
@@ -451,125 +460,124 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
          nlohmann::json layer_list  = value.at("layers");
          if (not layer_list.empty()) {
             element.proto_volume.container = Acts::ProtoVolume::ContainerStructure{};
-         for( nlohmann::json a_layer : layer_list) {
-            unsigned int layer_id = a_layer["layer"].get<unsigned int>();
-            std::shared_ptr<Acts::Surface> layer_surface = Acts::surfaceFromJson(a_layer);
-            if (!layer_surface || (layer_surface->type() != Acts::Surface::Disc && layer_surface->type() != Acts::Surface::Cylinder)) {
-               ACTS_ERROR("Layer " << layer_id << " of volume " << element.proto_volume.name
-                          << " is not a disc or cylinder but " << a_layer["type"].get<std::string>());
-            }
-            else {
-               nlohmann::json layer_transform_json = a_layer["transform"];
-               bool layer_is_z_axis_aligned=true;
-               if (layer_transform_json.find("rotation") != layer_transform_json.end()
-                   and not layer_transform_json["rotation"].empty()) {
-                  // @TODO check that matrix is not identity
-                  layer_is_z_axis_aligned = false;
-               }
-               const Acts::Transform3& layer_transform = layer_surface->transform(gctx);
-               if (   not floatsAgree(layer_transform.translation()[0],0.)
-                   or not floatsAgree(layer_transform.translation()[1],0.)) {
-                  layer_is_z_axis_aligned = false;
-               }
-               if (!layer_is_z_axis_aligned) {
+            element.proto_volume.container.value().constituentVolumes.reserve( layer_list.size() );
+            for( nlohmann::json a_layer : layer_list) {
+               unsigned int layer_id = a_layer["layer"].get<unsigned int>();
+               std::shared_ptr<Acts::Surface> layer_surface = Acts::surfaceFromJson(a_layer);
+               if (!layer_surface || (layer_surface->type() != Acts::Surface::Disc && layer_surface->type() != Acts::Surface::Cylinder)) {
                   ACTS_ERROR("Layer " << layer_id << " of volume " << element.proto_volume.name
-                             << " is not z-axis aligned.");
+                             << " is not a disc or cylinder but " << a_layer["type"].get<std::string>());
                }
                else {
-                  double layer_thickness = a_layer["thickness"].get<double>();
-                  ProtoVolume layer_volume;
-                  layer_volume.container=Acts::ProtoVolume::ContainerStructure{};
-                  layer_volume.container.value().layerContainer=true;
-                  layer_volume.internal = ProtoVolume::InternalStructure{};
-                  {
-                     std::stringstream tmp;
-                     tmp << element.proto_volume.name << "_" << layer_id;
-                     layer_volume.name = tmp.str();
+                  nlohmann::json layer_transform_json = a_layer["transform"];
+                  bool layer_is_z_axis_aligned=true;
+                  if (layer_transform_json.find("rotation") != layer_transform_json.end()
+                      and not layer_transform_json["rotation"].empty()) {
+                     // @TODO check that matrix is not identity
+                     layer_is_z_axis_aligned = false;
                   }
-
-                  // determine lauer type from the bounds of the surface representation
-                  switch (layer_surface->bounds().type()) {
-                  case Acts::SurfaceBounds::eCylinder: {
-                     const Acts::CylinderBounds &layer_bounds = static_cast<const Acts::CylinderBounds &>(layer_surface->bounds());
-                     layer_volume.extent.set(Acts::binR,
-                                             layer_bounds.values().at(Acts::CylinderBounds::eR) - layer_thickness *.5,
-                                             layer_bounds.values().at(Acts::CylinderBounds::eR) + layer_thickness *.5);
-                     layer_volume.extent.set(Acts::binZ,
-                                             layer_transform.translation()[2]
-                                             - layer_bounds.values().at(Acts::CylinderBounds::eHalfLengthZ),
-                                             layer_transform.translation()[2]
-                                             + layer_bounds.values().at(Acts::CylinderBounds::eHalfLengthZ));
-                     layer_volume.internal.value().layerType = Acts::Surface::SurfaceType::Cylinder;
-                     break;
+                  const Acts::Transform3& layer_transform = layer_surface->transform(gctx);
+                  if (   not floatsAgree(layer_transform.translation()[0],0.)
+                         or not floatsAgree(layer_transform.translation()[1],0.)) {
+                     layer_is_z_axis_aligned = false;
                   }
-                  case Acts::SurfaceBounds::eDisc: {
-                     const Acts::RadialBounds &layer_bounds = static_cast<const Acts::RadialBounds &>(layer_surface->bounds());
-                     if (layer_thickness<=0. ) {
-                        ACTS_ERROR("Layer " << layer_id << " of volume " << element.proto_volume.name
-                                   << " layer: " << layer_volume.name
-                                   << " disc layer thickness is zero : ");
-                     }
-                     ACTS_DEBUG("Add layer volume " << element.proto_volume.name
-                                << " Acts::binR " << layer_bounds.rMin() << " .. " << layer_bounds.rMax()
-                                << " Acts::binZ " << (layer_transform.translation()[2] - layer_thickness *.5)
-                                << " .. " << (layer_transform.translation()[2] + layer_thickness *.5) );
-
-                     layer_volume.extent.set(Acts::binR,layer_bounds.rMin(), layer_bounds.rMax());
-                     layer_volume.extent.set(Acts::binZ,
-                                             layer_transform.translation()[2] - layer_thickness *.5,
-                                             layer_transform.translation()[2] + layer_thickness *.5);
-                     layer_volume.internal.value().layerType = Acts::Surface::SurfaceType::Disc;
-                     break;
-                  }
-                  default: {
+                  if (!layer_is_z_axis_aligned) {
                      ACTS_ERROR("Layer " << layer_id << " of volume " << element.proto_volume.name
-                                << " has unsupported bounds :  "  << typeid(layer_surface->bounds() ).name());
-                     break;
+                                << " is not z-axis aligned.");
                   }
+                  else {
+                     double layer_thickness = a_layer["thickness"].get<double>();
+                     ProtoVolume layer_volume;
+                     layer_volume.container=Acts::ProtoVolume::ContainerStructure{};
+                     layer_volume.container.value().layerContainer=true;
+                     layer_volume.internal = ProtoVolume::InternalStructure{};
+                     {
+                        std::stringstream tmp;
+                        tmp << element.proto_volume.name << "_" << layer_id;
+                        layer_volume.name = tmp.str();
+                     }
+
+                     // determine lauer type from the bounds of the surface representation
+                     switch (layer_surface->bounds().type()) {
+                     case Acts::SurfaceBounds::eCylinder: {
+                        const Acts::CylinderBounds &layer_bounds = static_cast<const Acts::CylinderBounds &>(layer_surface->bounds());
+                        layer_volume.extent.set(Acts::binR,
+                                                layer_bounds.values().at(Acts::CylinderBounds::eR) - layer_thickness *.5,
+                                                layer_bounds.values().at(Acts::CylinderBounds::eR) + layer_thickness *.5);
+                        layer_volume.extent.set(Acts::binZ,
+                                                layer_transform.translation()[2]
+                                                - layer_bounds.values().at(Acts::CylinderBounds::eHalfLengthZ),
+                                                layer_transform.translation()[2]
+                                                + layer_bounds.values().at(Acts::CylinderBounds::eHalfLengthZ));
+                        layer_volume.internal.value().layerType = Acts::Surface::SurfaceType::Cylinder;
+                        break;
+                     }
+                     case Acts::SurfaceBounds::eDisc: {
+                        const Acts::RadialBounds &layer_bounds = static_cast<const Acts::RadialBounds &>(layer_surface->bounds());
+                        if (layer_thickness<=0. ) {
+                           ACTS_ERROR("Layer " << layer_id << " of volume " << element.proto_volume.name
+                                      << " layer: " << layer_volume.name
+                                      << " disc layer thickness is zero : ");
+                        }
+                        ACTS_DEBUG("Add layer volume " << element.proto_volume.name
+                                   << " Acts::binR " << layer_bounds.rMin() << " .. " << layer_bounds.rMax()
+                                   << " Acts::binZ " << (layer_transform.translation()[2] - layer_thickness *.5)
+                                   << " .. " << (layer_transform.translation()[2] + layer_thickness *.5) );
+
+                        layer_volume.extent.set(Acts::binR,layer_bounds.rMin(), layer_bounds.rMax());
+                        layer_volume.extent.set(Acts::binZ,
+                                                layer_transform.translation()[2] - layer_thickness *.5,
+                                                layer_transform.translation()[2] + layer_thickness *.5);
+                        layer_volume.internal.value().layerType = Acts::Surface::SurfaceType::Disc;
+                        break;
+                     }
+                     default: {
+                        ACTS_ERROR("Layer " << layer_id << " of volume " << element.proto_volume.name
+                                   << " has unsupported bounds :  "  << typeid(layer_surface->bounds() ).name());
+                        break;
+                     }
+                     }
+                     element.proto_volume.container.value().constituentVolumes.push_back(std::move(layer_volume));
                   }
-                  element.proto_volume.container.value().constituentVolumes.push_back(std::move(layer_volume));
+               }
+            }
+            element.proto_volume.container.value().layerContainer = true;
+            // identify non overlapping domains of the layers
+            unsigned int child_domain_overlaps=0;
+            for (unsigned int child_i=0;
+                 child_i<element.proto_volume.container.value().constituentVolumes.size();
+                 ++child_i) {
+               for (unsigned int child_j=child_i+1;
+                    child_j<element.proto_volume.container.value().constituentVolumes.size();
+                    ++child_j) {
+                  unsigned int domain_i;
+                  for (Acts::BinningValue bValue : acts_domain_type) {
+                     child_domain_overlaps |= (overlaps(element.proto_volume.container.value().constituentVolumes.at(child_i).extent,
+                                                        element.proto_volume.container.value().constituentVolumes.at(child_j).extent,
+                                                        bValue)
+                                               << domain_i);
+                     ++domain_i;
+                  }
+               }
+            }
+            unsigned int non_overlapping_domains = 0;
+            for(unsigned int domain_i =0 ; domain_i < acts_domain_type.size(); ++domain_i) {
+               non_overlapping_domains |= (1<<domain_i);
+            }
+            element.setDomainMask = non_overlapping_domains;
+            non_overlapping_domains &= ~child_domain_overlaps;
+            element.noOverlapMask  |= non_overlapping_domains;
+
+            // enable binning for all domains in which the layers do not overlap
+            for(unsigned int domain_i =0 ; domain_i < acts_domain_type.size(); ++domain_i) {
+               if (    (element.noOverlapMask & (1<<domain_i) ) ) {
+                  element.proto_volume.container.value().constituentBinning = {
+                     Acts::BinningData(Acts::closed,
+                                       acts_domain_type.at(domain_i),
+                     {0., 1.})};
                }
             }
          }
-         element.proto_volume.container.value().layerContainer = true;
-         // identify non overlapping domains of the layers
-         unsigned int child_domain_overlaps=0;
-         for (unsigned int child_i=0;
-              child_i<element.proto_volume.container.value().constituentVolumes.size();
-              ++child_i) {
-            for (unsigned int child_j=child_i+1;
-                 child_j<element.proto_volume.container.value().constituentVolumes.size();
-                 ++child_j) {
-               unsigned int domain_i;
-               for (Acts::BinningValue bValue : acts_domain_type) {
-                  child_domain_overlaps |= (overlaps(element.proto_volume.container.value().constituentVolumes.at(child_i).extent,
-                                                     element.proto_volume.container.value().constituentVolumes.at(child_j).extent,
-                                                     bValue)
-                                            << domain_i);
-                  ++domain_i;
-               }
-            }
-         }
-         unsigned int non_overlapping_domains = 0;
-         for(unsigned int domain_i =0 ; domain_i < acts_domain_type.size(); ++domain_i) {
-            non_overlapping_domains |= (1<<domain_i);
-         }
-         element.setDomainMask = non_overlapping_domains;
-         non_overlapping_domains &= ~child_domain_overlaps;
-         element.noOverlapMask  |= non_overlapping_domains;
-
-         // enable binning for all domains in which the layers do not overlap
-         for(unsigned int domain_i =0 ; domain_i < acts_domain_type.size(); ++domain_i) {
-            if (    (element.noOverlapMask & (1<<domain_i) ) ) {
-               element.proto_volume.container.value().constituentBinning = {
-                  Acts::BinningData(Acts::closed,
-                                    acts_domain_type.at(domain_i),
-                  {0., 1.})};
-            }
-         }
-         }
-
-
       }
    }
    // the tracking volumes must by cylindrical and must be z-axis aligned.
@@ -581,7 +589,8 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
 
    // find proto volumes without constituents. These are the volumes to process first.
    // also set domain mask i.e. a mask indicating which domains are identical for all constituents
-   // and a the noOverlapMask i.e. a mask indicating the domains in which constituents do not overlap
+   // and a the noOverlapMask i.e. a mask indicating the domains (i.e. radial ranges, or z-ranges)
+   // in which constituents do not overlap
    for(std::pair<const unsigned int, VolumeInfo> &element : hierarchy) {
       if (element.second.parent == std::numeric_limits<unsigned int>::max()) {
          world=&element.second;
@@ -651,6 +660,12 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
    // take element from front deque if childs have been processed if yes
    // add childs as constituents, mark as processed, put parent to end of queue
    // if childs are not processed put to end of queue
+
+   const std::unordered_map<Acts::BinningValue, Acts::Surface::SurfaceType>
+      binning_to_surface_type {
+          { Acts::binR, Acts::Surface::SurfaceType::Cylinder},
+          { Acts::binZ, Acts::Surface::SurfaceType::Disc} };
+
    while (!element_queue.empty()) {
       unsigned int element_idx = element_queue.front();
       element_queue.pop_front();
@@ -740,40 +755,21 @@ Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
          }
 
          if (n_domain_types==1) {
-            switch (last_domain_type){
-            case Acts::binR: {
-               if (an_element.proto_volume.container.value().layerContainer) {
-                  an_element.proto_volume.internal.value().layerType = Acts::Surface::SurfaceType::Cylinder;
+
+            if (an_element.proto_volume.container.value().layerContainer) {
+               const std::unordered_map<Acts::BinningValue, Acts::Surface::SurfaceType>::const_iterator
+                  binning_to_surface_type_iter = binning_to_surface_type.find(last_domain_type);
+               if (binning_to_surface_type_iter != binning_to_surface_type.end()) {
+                  an_element.proto_volume.internal.value().layerType = binning_to_surface_type_iter->second;
                }
-               break;
-            }
-            case Acts::binZ: {
-               if (an_element.proto_volume.container.value().layerContainer) {
-                  an_element.proto_volume.internal.value().layerType = Acts::Surface::SurfaceType::Disc;
-               }
-               break;
-            }
-            default:
-               break;
             }
          }
          an_element.processed = childs_processed;
 
          an_element.proto_volume.container.value().constituentVolumes.reserve( an_element.childs.size() );
-         // bool childs_have_constituents=false;
-         // Acts::Surface::SurfaceType child_surface_type=Acts::Surface::Other;
          for(unsigned int child_i=0; child_i<an_element.childs.size(); ++child_i) {
-            an_element.proto_volume.container.value().constituentVolumes.push_back( std::move(hierarchy.at(an_element.childs.at(child_i) ).proto_volume) );
-         //    child_surface_type = ((child_i==0 && an_element.proto_volume.container.value().constituentVolumes.back().internal.has_value())
-         //                          || (an_element.proto_volume.container.value().constituentVolumes.back().internal.has_value()
-         //                              && child_surface_type
-         //                              == an_element.proto_volume.container.value().constituentVolumes.back().internal.value().layerType))
-         //       ? an_element.proto_volume.container.value().constituentVolumes.back().internal.value().layerType
-         //       : Acts::Surface::Other;
-         //    if (an_element.proto_volume.container.value().constituentVolumes.back().container.has_value()
-         //        and not an_element.proto_volume.container.value().constituentVolumes.back().container.value().constituentVolumes.empty()) {
-         //       childs_have_constituents=true;
-         //    }
+            an_element.proto_volume.container.value().constituentVolumes.push_back(
+                std::move(hierarchy.at(an_element.childs.at(child_i) ).proto_volume) );
          }
 
          if (an_element.parent < hierarchy.size()) {
@@ -813,9 +809,10 @@ namespace {
 }
 
 std::tuple<std::vector<std::shared_ptr<Acts::Surface>>,
-           std::vector< std::vector< unsigned int >>,
            std::vector<std::unique_ptr<DetectorElementBase>> >
-TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geometry_description) const {
+TrackingGeometryJsonReader::createSurfaces(
+    const nlohmann::json& tracking_geometry_description,
+    bool ignore_material) const {
    nlohmann::json surfaces_in = tracking_geometry_description["Surfaces"];
    int version = surfaces_in["acts-geometry-hierarchy-map"]["format-version"].get<int>();
    static std::array<int,1> supported_versions{0};
@@ -826,7 +823,6 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
 
 
    std::tuple<std::vector<std::shared_ptr<Acts::Surface>>,
-              std::vector< std::vector< unsigned int >>,
               std::vector<std::unique_ptr<DetectorElementBase>> >
       surfaces_out;
    std::get<0>(surfaces_out).reserve( surface_list.size() );
@@ -838,7 +834,6 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
    unsigned int counter_i=0;
    for( nlohmann::json a_surface : surface_list) {
       // skip boundary surfaces
-      // @TODO check for sensitive surfaces
       if (a_surface.contains("boundary") || a_surface.contains("approach")) {
          continue;
       }
@@ -869,24 +864,18 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
 
          if (a_surface["value"].contains("detID") ) {
             uint64_t det_id = a_surface["value"]["detID"].get<uint64_t>();
-            std::get<2>(surfaces_out).push_back(std::make_unique<::Test::IdentifiableDetectorElement>( surface_ptr.get(), det_id, 0.f));
-            surface_ptr->associateDetectorElement( std::get<2>(surfaces_out).back().get() );
-            const ::Test::IdentifiableDetectorElement *
-               det_element=dynamic_cast<const ::Test::IdentifiableDetectorElement *>(surface_ptr->associatedDetectorElement());
+            std::get<1>(surfaces_out).push_back(std::make_unique<::Test::IdentifiableDetectorElement>( surface_ptr.get(), det_id, 0.f));
+            surface_ptr->associateDetectorElement( std::get<1>(surfaces_out).back().get() );
          }
          if (a_surface.contains("sensitive")) {
             std::get<0>(surfaces_out).push_back( std::move(surface_ptr) );
-            if (layer_id.volumeId() >= std::get<1>(surfaces_out).size()) {
-               std::get<1>(surfaces_out).resize( layer_id.volumeId() + 1 );
-            }
-            std::get<1>(surfaces_out).at(layer_id.volumeId()).push_back(std::get<0>(surfaces_out).size()-1);
             ++insert_ret.first->second.nSensitiveSurfaces;
          }
          else {
             insert_ret.first->second.nonSensitiveSurfaces.push_back( std::move(surface_ptr));
          }
 
-         if (a_surface["value"].contains("material") && a_surface["value"]["material"].contains("data")) {
+         if (!ignore_material && a_surface["value"].contains("material") && a_surface["value"]["material"].contains("data")) {
             const Acts::ISurfaceMaterial *surface_material = nullptr;
             Acts::from_json(a_surface["value"]["material"],surface_material);
             std::map<GeometryIdentifier, std::shared_ptr<const ISurfaceMaterial>> material;
@@ -923,10 +912,6 @@ TrackingGeometryJsonReader::createSurfaces(const nlohmann::json& tracking_geomet
 
          for ( std::shared_ptr<Acts::Surface> &a_surface_ptr : surface_info.second.nonSensitiveSurfaces ) {
             std::get<0>(surfaces_out).push_back( std::move(a_surface_ptr) );
-            if (surface_info.first.volumeId() >= std::get<1>(surfaces_out).size()) {
-               std::get<1>(surfaces_out).resize( surface_info.first.volumeId() + 1 );
-            }
-            std::get<1>(surfaces_out).at(surface_info.first.volumeId()).push_back(std::get<0>(surfaces_out).size()-1);
             ACTS_VERBOSE("Add non sensitive surface " << idx << " for volume " << surface_info.first.volumeId()
                          << " layer " << surface_info.first.layerId());
             ++idx;
@@ -962,17 +947,18 @@ namespace {
 std::shared_ptr<const Acts::TrackingGeometry>
 TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& tracking_geometry_description,
                                                    std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const {
-   auto [surfaces, surfaces_per_volume, detector_elements]
-     = createSurfaces( tracking_geometry_description);
 
-   Acts::ProtoDetector detector(  createProtoDetector(tracking_geometry_description, surfaces, surfaces_per_volume) );
+   auto [surfaces, detector_elements]
+      = createSurfaces( tracking_geometry_description, mdecorator.get() != nullptr );
+
+   Acts::ProtoDetector detector(  createProtoDetector(tracking_geometry_description) );
    detector.harmonize(true);
 
    // @TODO copied from Examples/Detectors/Geant4Detector/src/Geant4DetectorService.cpp.
    //    Move to a helper function ?
    Acts::GeometryContext tContext;
 
-   // Surface array creatorr
+   // Surface array creator
    auto surfaceArrayCreator =
       std::make_shared<const Acts::SurfaceArrayCreator>(
           Acts::SurfaceArrayCreator::Config(),
@@ -1012,16 +998,20 @@ TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& trackin
 
    // the material is read from the json together with the surface, layer, and volume
    // geometry data, so the builder just gets a dummy material decorator which does
-   // nothing
-   std::shared_ptr<const Acts::IMaterialDecorator> dummy_material_decorator ( new DummyMaterialDecorator );
-   kdtgConfig.materialDecorator = std::move( dummy_material_decorator );
+   // nothing, but it is also possible to provide external material
+   if (!mdecorator)  {
+      std::shared_ptr<const Acts::IMaterialDecorator> dummy_material_decorator ( new DummyMaterialDecorator );
+      kdtgConfig.materialDecorator = std::move( dummy_material_decorator );
+   }
+   else {
+      kdtgConfig.materialDecorator = std::move( mdecorator );
+   }
 
    kdtgConfig.creator=[&detector_elements](const MutableTrackingVolumePtr& a_highestVolume,
                          const IMaterialDecorator* a_materialDecorator) {
       return std::unique_ptr<const TrackingGeometry>(new TrackingGeometryWithDetectorElements(a_highestVolume,a_materialDecorator,
                                                                                               std::move(detector_elements)));
    };
-
 
    // Make the builder
    auto kdtTrackingGeometryBuilder = Acts::KDTreeTrackingGeometryBuilder(

@@ -25,23 +25,22 @@ if False :
 
 config = acts.MaterialMapJsonConverter.Config()
 customLogLevel = acts.examples.defaultLogging(logLevel=acts.logging.INFO)
-mdecorator = acts.JsonMaterialDecorator(
-    rConfig=config,
-    level=customLogLevel(minLevel=acts.logging.WARNING),
-    jFileName="acts-ws/build-sft/geometry-maps-volbounds_2023_material.json",
-)
+# mdecorator = acts.JsonMaterialDecorator(
+#     rConfig=config,
+#    level=customLogLevel(minLevel=acts.logging.WARNING),
+#    jFileName="acts-ws/build-sft/geometry-maps-volbounds_2023_material.json",
+# )
 
 jsonTGReaderCfg =     acts.examples.TrackingGeometryJsonReader.Config(detectorName="ITK",
                                                     toolLogLevel = acts.logging.VERBOSE,
                                                     logLevel = acts.logging.VERBOSE,
-                                                    # geantinoInputFileName = "geant4_material_tracks.root",
-                                                    # maxGeantinoEntries = 1000
-                                                                      stop=True
                                                    )
 jsonTGReader=acts.examples.TrackingGeometryJsonReader(jsonTGReaderCfg)
 # trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps-volbounds_2023.json", mdecorator)
 # trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco_default.json", mdecorator)
-trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco.json",mdecorator)
+# trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco.json",mdecorator)
+# material provided by the same json file
+trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco.json", None)
 
 print ("buildITkGeometry done")
 
@@ -52,7 +51,7 @@ def readAthenaMeasurements(trackingGeometry, inputFile, outputDir, s=None):
 
     # s = acts.examples.Sequencer(events=1, numThreads=-1, outputDir=str(outputDir))
     s = acts.examples.Sequencer(
-        events=int(os.environ.get("NEVENTS", 100)), numThreads=1,
+        events=int(os.environ.get("NEVENTS", 10)), numThreads=1,
         outputDir=str(outputDir),
     )
 
