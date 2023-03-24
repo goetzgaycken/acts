@@ -11,7 +11,7 @@
 #include "Acts/Surfaces/RadialBounds.hpp"
 #include "Acts/Surfaces/RectangleBounds.hpp"
 
-#include "Core/include/Acts/Geometry/IdentifiableDetectorElement.hpp"
+#include "Acts/Geometry/IdentifiableDetectorElement.hpp"
 #include "Acts/Plugins/Json/TrackingGeometryJsonReader.hpp"
 #include "Acts/Plugins/Json/VolumeBoundsJsonConverter.hpp"
 #include "Acts/Plugins/Json/AlgebraJsonConverter.hpp"
@@ -39,6 +39,8 @@
 
 // dump geom
 #include <deque>
+#include "Acts/Surfaces/AnnulusBounds.hpp"
+#include "Acts/Surfaces/PlanarBounds.hpp"
 
 namespace {
 
@@ -285,6 +287,139 @@ namespace {
          dumpTrackingVolumeHierarchy(geom->highestTrackingVolume());
       }
    }
+
+   float scale(float a, float b) {
+      float tmp=std::abs(a+b);
+      return tmp == 0. ? 2. : tmp;
+   }
+   /// Test whether two floats agree to very high precision
+   bool floatsAgree(float a, float b) {
+      return std::abs(a-b) < std::numeric_limits<float>::epsilon() * scale(a,b);
+   }
+
+   std::tuple< std::multimap<uint64_t, const Acts::Surface *>, std::map<std::string,const Acts::TrackingVolume *> >
+   collectSurfacesAndVolumes(const Acts::TrackingGeometry &geom, const std::string &header) {
+      std::multimap<uint64_t, const Acts::Surface *> surfaces;
+      std::map<std::string,const Acts::TrackingVolume *> volumes;
+      geom.visitSurfaces([&surfaces, &volumes, &header](const Acts::Surface* surface) {
+         uint64_t det_id=0;
+         if (surface->associatedDetectorElement()) {
+            const Acts::IdentifiableDetectorElement *
+               det_element = dynamic_cast<const Acts::IdentifiableDetectorElement *>(surface->associatedDetectorElement());
+            if (det_element) {
+               det_id = det_element->detectorId();
+               if (!header.empty()) {
+                  std::cout << header << " " << det_id << std::endl;
+               }
+            }
+            else {
+               if (!header.empty()) {
+                  std::cout << header << " Detector element of unsupported type: " <<  typeid(*surface->associatedDetectorElement()).name() << std::endl;
+               }
+            }
+         }
+         else if (surface->geometryId().sensitive()) {
+            std::cout << header << " Sensitive surface withtout detector element : " <<   surface->geometryId().value() << std::endl;
+         }
+         
+         surfaces.insert( std::make_pair( det_id , surface ) );
+         if (surface->associatedLayer()
+             && surface->associatedLayer()->trackingVolume()) {
+            volumes.insert( std::make_pair (surface->associatedLayer()->trackingVolume()->volumeName(),
+                                            surface->associatedLayer()->trackingVolume()) );
+         }
+      });
+      return std::make_tuple (std::move(surfaces), std::move(volumes));
+   }
+   void compareTrackingGeometry(const Acts::TrackingGeometry &geom, const Acts::TrackingGeometry &geom_ref) {
+      
+      std::tuple< std::multimap<uint64_t, const Acts::Surface *>,
+                  std::map<std::string,const Acts::TrackingVolume *> > chk = collectSurfacesAndVolumes(geom, "DEBUG chk detID ");
+      std::tuple< std::multimap<uint64_t, const Acts::Surface *>,
+                  std::map<std::string,const Acts::TrackingVolume *> > ref = collectSurfacesAndVolumes(geom_ref, "DEBUG ref detID ");
+      if (std::get<0>(chk).size() != std::get<0>(ref).size() ) {
+         std::cout << "ERROR number of surfaces differs : " << std::get<0>(chk).size() << " != " << std::get<0>(ref).size()
+                   << std::endl;
+      }
+      if (std::get<1>(chk).size() != std::get<1>(ref).size() ) {
+         std::cout << "ERROR number of volumes differs : " << std::get<1>(chk).size() << " != " << std::get<1>(ref).size()
+                   << std::endl;
+      }
+      // compare volumes
+      for (const auto  &elm : std::get<1>(chk) ) {
+         if (std::get<1>(ref).find( elm.first ) == std::get<1>(ref).end()) {
+            std::cout << "ERROR missing volume in ref " << elm.first << std::endl;
+         }
+      }
+      for (const auto  &elm : std::get<1>(ref) ) {
+         if (std::get<1>(chk).find( elm.first ) == std::get<1>(chk).end()) {
+            std::cout << "ERROR missing volume in chk " << elm.first << std::endl;
+         }
+      }
+
+      // compare surfaces
+      Acts::GeometryContext gctx;
+      unsigned int surface_errors=0;
+      unsigned int comparisons=0;
+      for (unsigned int pass_i=0; pass_i<2; ++pass_i) {
+         std::string header;
+         const std::multimap<uint64_t, const Acts::Surface *>  *the_ref;
+         const std::multimap<uint64_t, const Acts::Surface *>  *the_chk;
+         if (pass_i==0) {
+            the_chk = &std::get<0>(chk);
+            the_ref = &std::get<0>(ref);
+            header = "ref";
+         }
+         else {
+            the_chk = &std::get<0>(ref);
+            the_ref = &std::get<0>(chk);
+            header = "chk";
+         }
+      
+         for (const auto  &elm : *the_ref ) {
+         auto iter = the_chk->lower_bound( elm.first );
+         bool found=false;
+         double min_diff=std::numeric_limits<double>::max();
+         unsigned int elm_comparisons=0;
+         for (;iter != the_chk->end() && iter->first == elm.first; ++iter) {
+            bool agree=true;
+            if (elm.second && iter->second) {
+               ++elm_comparisons;
+               for (unsigned int coord_i=0; coord_i< elm.second->center(gctx).size(); ++coord_i) {
+                  if (!floatsAgree(elm.second->center(gctx)[coord_i], iter->second->center(gctx)[coord_i])) {
+                     min_diff=std::min(min_diff,(elm.second->center(gctx)[coord_i] - iter->second->center(gctx)[coord_i]));
+                     agree=false;
+                     break;
+                  }
+               }
+            }
+            if (agree) {
+               found=true;
+               break;
+            }
+         }
+         
+         if (!found) {
+            std::string volume_name ("(none)");
+            const Acts::Surface *the_surface = elm.second;
+            if (the_surface && the_surface->associatedLayer()
+                && the_surface->associatedLayer()->trackingVolume()) {
+               volume_name=the_surface->associatedLayer()->trackingVolume()->volumeName();
+            }
+            std::cout << "ERROR missing surface " << elm.first << " in volume " << volume_name << " best match : " << min_diff
+                      << " comparisons : " << elm_comparisons
+                      << std::endl;
+            ++surface_errors;
+         }
+         else {
+            ++comparisons;
+         }
+      }
+      }
+      std::cout << "DEBUG surface comparisons with errors "  << surface_errors <<  " / " << comparisons << std::endl;
+   }
+      
+
 }
 
 
@@ -352,11 +487,27 @@ TrackingGeometryJsonReader::registerVolume(unsigned int volume_id,
 }
 
 std::shared_ptr<const Acts::TrackingGeometry>
- TrackingGeometryJsonReader::read(const std::string &file_name, std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const {
-
+ TrackingGeometryJsonReader::read(const std::string &a_file_name, std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const {
+   std::string file_name(a_file_name);
+   std::string::size_type pos = file_name.find("::");
+   std::string ref_file_name;
+   if (pos != std::string::npos) {
+      ref_file_name =file_name.substr(0,pos);
+      file_name=std::string( file_name.substr(pos+2,file_name.size()-(pos+2)) );
+   }
  std::ifstream f(file_name);
  nlohmann::json tracking_geometry_description = nlohmann::json::parse(f);
- return createTrackingGeometry(tracking_geometry_description, std::move(mdecorator));
+ std::shared_ptr<const Acts::TrackingGeometry> tg=createTrackingGeometry(tracking_geometry_description, std::move(mdecorator));
+ if (!ref_file_name.empty()) {
+    std::ifstream f_ref(ref_file_name);
+    nlohmann::json tracking_geometry_description_ref = nlohmann::json::parse(f_ref);
+    std::shared_ptr<const Acts::TrackingGeometry> tg_ref=createTrackingGeometry(tracking_geometry_description_ref, std::move(mdecorator));
+    if (tg && tg_ref) {
+       std::cout << "DEBUG compare " << file_name << " and " << ref_file_name << std::endl;
+       compareTrackingGeometry(*tg,*tg_ref);
+    }
+ }
+ return tg;
 }
 
 Acts::ProtoDetector TrackingGeometryJsonReader::createProtoDetector(
@@ -809,6 +960,7 @@ TrackingGeometryJsonReader::createSurfaces(
 
             if (a_surface["value"].contains("detID") ) {
                det_id = a_surface["value"]["detID"].get<uint64_t>();
+               std::cout << "DEBUG Read detID "<< det_id << " but ignored." << std::endl;
             }
          }
          ACTS_WARNING( "Failed to create surface " << counter_i << " IDs geo: " << geo_id
@@ -826,6 +978,10 @@ TrackingGeometryJsonReader::createSurfaces(
             uint64_t det_id = a_surface["value"]["detID"].get<uint64_t>();
             std::get<1>(surfaces_out).push_back(std::make_unique<Acts::IdentifiableDetectorElement>( *surface_ptr, det_id, 0.f));
             surface_ptr->associateDetectorElement( std::get<1>(surfaces_out).back().get() );
+            std::cout << "DEBUG Read detID "<< det_id << " associate to detector element "
+                      << static_cast< const void *>(surface_ptr->associatedDetectorElement())
+                      << " sensitive ? " << surface_ptr->geometryId().sensitive()
+                      << std::endl;
          }
          if (a_surface.contains("sensitive")) {
             std::get<0>(surfaces_out).push_back( std::move(surface_ptr) );
@@ -907,7 +1063,6 @@ namespace {
 std::shared_ptr<const Acts::TrackingGeometry>
 TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& tracking_geometry_description,
                                                    std::shared_ptr<const Acts::IMaterialDecorator> mdecorator) const {
-
    auto [surfaces, detector_elements]
       = createSurfaces( tracking_geometry_description, mdecorator.get() != nullptr );
 
@@ -973,6 +1128,10 @@ TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& trackin
                                                                                               std::move(detector_elements)));
    };
 
+   std::unordered_map<const Acts::Surface *, std::pair<uint64_t, bool> > all_surfaces;
+   for (const auto &elm : kdtgConfig.surfaces ) {
+      all_surfaces.insert( std::make_pair( elm.get(), std::make_pair(elm->geometryId().value(), false)) );
+   }
    // Make the builder
    auto kdtTrackingGeometryBuilder = Acts::KDTreeTrackingGeometryBuilder(
       kdtgConfig, Acts::getDefaultLogger("KDTreeTrackingGeometryBuilder",
@@ -982,6 +1141,79 @@ TrackingGeometryJsonReader::createTrackingGeometry(const nlohmann::json& trackin
       kdtTrackingGeometryBuilder.trackingGeometry(tContext).release());
    dumpTrackingGeometry( tmp.get() );
 
+   std::map<uint64_t, std::vector< const Acts::Surface * > > unused_surfaces;
+   tmp->visitSurfaces([&all_surfaces](const Acts::Surface* surface) {
+      auto iter = all_surfaces.find(surface);
+      if (iter == all_surfaces.end()) {
+         std::cout << "ERROR unknown surface " << (surface ? surface->geometryId().value() : 0ul)
+                   << " in volume " << (surface && surface->associatedLayer() && surface->associatedLayer()->trackingVolume()
+                       ? surface->associatedLayer()->trackingVolume()->volumeName()
+                       : std::string(""))
+                   << std::endl;
+      }
+      else {
+         iter->second.second = true;
+      }
+   });
+   for (const auto &elm : all_surfaces) {
+      if (!elm.second.second) {
+         if (elm.second.first != elm.first->geometryId().value()) {
+               std::cout << "ERROR inconsistent surface data for unused surface  " << elm.second.first << " -> " << Acts::GeometryIdentifier(elm.second.first)
+                         << " != " << elm.first->geometryId().value()
+                         << std::endl;
+         }
+         else {
+            Acts::GeometryIdentifier id{};
+            id.setVolume( elm.first->geometryId().volume() );
+            id.setLayer( elm.first->geometryId().layer() );
+            unused_surfaces[id.value()].push_back( elm.first );
+            std::cout << "ERROR unused surface " << elm.second.first << " -> " << Acts::GeometryIdentifier(elm.second.first)
+                      << std::endl;
+         }
+      }
+   }
+   Acts::GeometryContext gctx;
+   for (const auto &surf_list : unused_surfaces ) {
+      Acts::GeometryIdentifier id{surf_list.first};
+      std::cout <<  "UNUSEDSURF " << surf_list.first // pdg-id
+                << " " << id.volume() // barcode
+                << " " << id.layer() // pt
+                << " " << 0. // dir-x
+                << " " << 0. // dir-y
+                << " " << 0. // dir-z
+                << " " << surf_list.second.size();  // n-hits
+      for (const auto &surf : surf_list.second) {
+         Acts::Vector3 the_center( surf->center( gctx) );
+         std::cout << " " << 1  // contributions
+                   << " " << the_center[0]
+                   << " " << the_center[1]
+                   << " " << the_center[2];
+
+         std::vector<Acts::Vector2> corners;
+         if (surf) {
+            const Acts::AnnulusBounds *annulus_bounds = dynamic_cast<const Acts::AnnulusBounds *>( &surf->bounds() );
+            if (annulus_bounds) {
+               corners = annulus_bounds->corners();
+            }
+            else {
+               const Acts::PlanarBounds *bounds = dynamic_cast<const Acts::PlanarBounds *>( &surf->bounds() );
+               if (bounds) {
+                  corners = bounds->vertices(1);
+               }
+            }
+         }
+
+         Acts::Vector3 dummy_momentum{1.,1.,1.};
+         std::cout << " " << corners.size();
+         for (const Acts::Vector2 &a_corner  : corners) {
+            Acts::Vector3 glob = surf->localToGlobal(gctx,
+                                                     a_corner,
+                                                     dummy_momentum);
+            std::cout << " " << glob[0] << " " << glob[1] << " " << glob[2] ;
+         }
+      }
+      std::cout << std::endl;
+   }
    return tmp;
 
 }
