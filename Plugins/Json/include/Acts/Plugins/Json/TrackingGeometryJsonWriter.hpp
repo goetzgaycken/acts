@@ -49,7 +49,11 @@ public:
    void write(
        const std::shared_ptr<const Acts::TrackingGeometry> &tracking_geometry,
        const std::string &file_name,
-       const Acts::GeometryContext& gctx=Acts::GeometryContext()) const;
+       const Acts::GeometryContext& gctx) const;
+
+   void writeNominal(
+       const std::shared_ptr<const Acts::TrackingGeometry> &tracking_geometry,
+       const std::string &file_name) const;
 
    /// Create a json object which describes the tracking geometry
    /// @return json object describing the tracking geometry
