@@ -41,6 +41,20 @@ jsonTGReader=acts.examples.TrackingGeometryJsonReader(jsonTGReaderCfg)
 # trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco.json",mdecorator)
 # material provided by the same json file
 trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco.json", None)
+# trackingGeometry = jsonTGReader.read("/data/goetz/src/ACTS/source/tg_dup.json", None)
+# trackingGeometry = jsonTGReader.read("/data/goetz/ws/IDPVM/run/ITK_ttbar_mu200/geometry-maps_track_reco.json::/data/goetz/src/ACTS/source/tg_dup.json", None)
+
+jsonTGWriterCfg = acts.examples.TrackingGeometryJsonWriter.Config(
+    logLevel = acts.logging.VERBOSE,
+    processSensitives=True,
+    processApproaches=True,
+    processRepresenting=True,
+    processBoundaries=True,
+    processVolumes=True,
+    processNonMaterial = True)
+
+jsonTGWriter=acts.examples.TrackingGeometryJsonWriter(jsonTGWriterCfg)
+jsonTGWriter.writeNominal(trackingGeometry,"tg_dup2.json")
 
 print ("buildITkGeometry done")
 
