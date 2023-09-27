@@ -9,4 +9,5 @@ target_sources(
         Intersection.cpp
         GraphViz.cpp
         DumpToAscii.cpp
+	Counter.cpp
 )
