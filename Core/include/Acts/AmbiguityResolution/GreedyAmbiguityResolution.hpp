@@ -48,7 +48,8 @@ class GreedyAmbiguityResolution {
 
   struct State {
     std::size_t numberOfTracks{};
-
+    std::size_t numberOfTrackContainer{};
+    std::vector<unsigned int> trackContainer;
     std::vector<int> trackTips;
     std::vector<float> trackChi2;
     std::vector<std::vector<std::size_t>> measurementsPerTrack;
@@ -80,10 +81,11 @@ class GreedyAmbiguityResolution {
   template <typename track_container_t, typename traj_t,
             template <typename> class holder_t, typename source_link_hash_t,
             typename source_link_equality_t>
-  void computeInitialState(
+  void addTracks(
       const TrackContainer<track_container_t, traj_t, holder_t>& tracks,
       State& state, source_link_hash_t&& sourceLinkHash,
       source_link_equality_t&& sourceLinkEquality) const;
+  void computeInitialState(State& state) const;
 
   /// Updates the state iteratively by evicting one track after the other until
   /// the final state conditions are met.

@@ -17,7 +17,7 @@ namespace Acts {
 template <typename track_container_t, typename traj_t,
           template <typename> class holder_t, typename source_link_hash_t,
           typename source_link_equality_t>
-void GreedyAmbiguityResolution::computeInitialState(
+void GreedyAmbiguityResolution::addTracks(
     const TrackContainer<track_container_t, traj_t, holder_t>& tracks,
     State& state, source_link_hash_t&& sourceLinkHash,
     source_link_equality_t&& sourceLinkEquality) const {
@@ -45,6 +45,7 @@ void GreedyAmbiguityResolution::computeInitialState(
       }
     }
 
+    state.trackContainer.push_back(state.numberOfTrackContainer);
     state.trackTips.push_back(track.index());
     state.trackChi2.push_back(track.chi2() / track.nDoF());
     state.measurementsPerTrack.push_back(std::move(measurements));
@@ -52,7 +53,10 @@ void GreedyAmbiguityResolution::computeInitialState(
 
     ++state.numberOfTracks;
   }
+  ++state.numberOfTrackContainer;
+}
 
+inline void GreedyAmbiguityResolution::computeInitialState(State& state) const {
   // Now we relate measurements to tracks
   for (std::size_t iTrack = 0; iTrack < state.numberOfTracks; ++iTrack) {
     for (auto iMeasurement : state.measurementsPerTrack[iTrack]) {
