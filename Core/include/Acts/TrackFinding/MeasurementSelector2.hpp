@@ -20,6 +20,7 @@
 #include "Acts/Geometry/GeometryHierarchyMap.hpp"
 #include "Acts/EventData/Types.hpp"
 #include "Acts/EventData/TrackStatePropMask.hpp"
+#include "boost/container/small_vector.hpp"
 
 // for BaseTypes
 #include "Acts/EventData/TrackStateProxy.hpp"
@@ -28,6 +29,10 @@
 
 // for MeasurementSizeMax
 #include "Acts/EventData/MultiTrajectory.hpp"
+
+namespace Acts {
+   constexpr std::size_t NMaxBranchesPerSurface = 12;
+}
 
 template <typename traj_t>
 struct BaseTypes {
@@ -420,7 +425,6 @@ struct MeasurementSelector2 {
             return Acts::CombinatorialKalmanFilterError::MeasurementSelectionFailed;
          }
 
-         //         const std::vector<std::pair<float, float> >& chi2CutOff = cuts->chi2CutOff;
          std::size_t eta_bin = getEtaBin(std::get<0>(boundState), cuts->etaBins);
          const std::pair<float,float> maxChi2Cut = ! cuts->chi2CutOff.empty()
             ? cuts->chi2CutOff[ std::min(cuts->chi2CutOff.size()-1, eta_bin) ]
@@ -493,9 +497,7 @@ struct MeasurementSelector2 {
    };
 
    template <typename source_link_iterator_t>
-   Acts::Result<std::pair<
-                   typename std::vector<typename T_BaseTypes::TrackStateProxy>::iterator,
-                   typename std::vector<typename T_BaseTypes::TrackStateProxy>::iterator>>
+   Acts::Result<boost::container::small_vector< typename T_BaseTypes::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface> >
    createSourceLinkTrackStates(const Acts::GeometryContext& geoContext,
                                const Acts::CalibrationContext* calibrationContext,
                                const Acts::Surface& surface,
@@ -503,10 +505,14 @@ struct MeasurementSelector2 {
                                source_link_iterator_t sourceLinkBegin,
                                source_link_iterator_t sourceLinkEnd,
                                std::size_t prevTip,
+                               [[maybe_unused]] typename T_BaseTypes::trajectory_t& trajectory_buffer,
+                               [[maybe_unused]] std::vector<typename T_BaseTypes::TrackStateProxy> &trackStateCandidates,
                                typename T_BaseTypes::trajectory_t& trajectory,
-                               std::vector<typename T_BaseTypes::TrackStateProxy> &trackStateCandidates,
-                               bool &isOutlier,
                                const Acts::Logger& logger) const {
+      static_assert( NMeasMax<=Acts::NMaxBranchesPerSurface );
+      using TrajIndexType = typename T_BaseTypes::TrackStateProxy::IndexType;
+      Acts::Result<boost::container::small_vector< TrajIndexType, Acts::NMaxBranchesPerSurface> >
+         ret_track_states{boost::container::small_vector< typename T_BaseTypes::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface>()};
       MultiDimParameterMap<DIMMAX> parameter_map;
       Acts::Result<TopCollection<NMeasMax, MatchingMeasurement<DIMMAX, T_BaseTypes> > >
           compatible_measurements = compatibleMeasurements(geoContext,
@@ -517,89 +523,79 @@ struct MeasurementSelector2 {
                                                            sourceLinkEnd,
                                                            logger,
                                                            parameter_map);
-       trackStateCandidates.clear();
-       if (!compatible_measurements.ok()) {
-         return Acts::CombinatorialKalmanFilterError::MeasurementSelectionFailed;
-       }
-       else if (compatible_measurements.ok() && !compatible_measurements->empty()) {
-          if constexpr (std::is_same_v<
-                        typename std::iterator_traits<
-                        source_link_iterator_t>::iterator_category,
-                        std::random_access_iterator_tag>) {
-             unsigned int n_measurements
-                = std::max(std::count_if ( compatible_measurements->begin(),
-                                           compatible_measurements->end(),
-                                           [&compatible_measurements]
-                                           (typename TopCollection<NMeasMax, MatchingMeasurement<DIMMAX, T_BaseTypes> >::IndexType idx) {
-                                              return !compatible_measurements->getSlot(idx).m_isOutLier;
-                                           }),
-                           1u);
-             trackStateCandidates.reserve(n_measurements);
-          }
-       }
-       trajectory.clear();
-       using PM = Acts::TrackStatePropMask;
-       Acts::ProjectorBitset projector_bitset = ProjectorBitSetMaker::create(parameter_map);
+      if (!compatible_measurements.ok()) {
+        return Acts::CombinatorialKalmanFilterError::MeasurementSelectionFailed;
+      }
+      using PM = Acts::TrackStatePropMask;
+      Acts::ProjectorBitset projector_bitset = ProjectorBitSetMaker::create(parameter_map);
 
-       // create track states for all compatible measurement candidates
-       const auto &boundParams = std::get<0>(boundState);
-       const auto &pathLength = std::get<2>(boundState);
+      // create track states for all compatible measurement candidates
+      const auto &boundParams = std::get<0>(boundState);
+      const auto &pathLength = std::get<2>(boundState);
 
-       bool first_state=true;
-       for (typename TopCollection<NMeasMax, MatchingMeasurement<DIMMAX, T_BaseTypes> >::IndexType
+      using PM = Acts::TrackStatePropMask;
+
+      boost::container::small_vector< typename T_BaseTypes::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface>
+         &track_states = *ret_track_states;
+      track_states.reserve( compatible_measurements->end() - compatible_measurements->begin() );
+      std::optional<typename T_BaseTypes::TrackStateProxy> firstTrackState{
+          std::nullopt};
+      for (typename TopCollection<NMeasMax, MatchingMeasurement<DIMMAX, T_BaseTypes> >::IndexType
                idx: *compatible_measurements) {
-          // prepare the track state
-          PM mask = PM::Calibrated;
+        const MatchingMeasurement<DIMMAX, T_BaseTypes> &a_compatible_measurement = compatible_measurements->getSlot(idx);
 
-          if (first_state) {
+        PM mask = PM::Predicted | PM::Filtered | PM::Jacobian | PM::Calibrated;
 
-             // not the first TrackState, only need uncalibrated and calibrated
-             mask = PM::Predicted | PM::Jacobian | PM::Calibrated;
-             isOutlier = compatible_measurements->getSlot(idx).m_isOutLier;
-          }
-          else if (compatible_measurements->getSlot(idx).m_isOutLier) {
-             break;
-          }
-          ACTS_VERBOSE("Create temp track state with mask: " << mask);
-          // CAREFUL! This trackstate has a previous index that is not in this
-          // MultiTrajectory Visiting brackwards from this track state will
-          // fail!
-          typename T_BaseTypes::TrackStateProxy ts = trajectory.makeTrackState(mask, prevTip);
-          if (first_state) {
-             // only set these for first
-             ts.predicted() = boundParams.parameters();
-             if (boundParams.covariance()) {
-                ts.predictedCovariance() = *boundParams.covariance();
-             }
-             ts.jacobian() = std::get<1>(boundState);
-             first_state=false;
-          } else {
-             // subsequent track states can reuse
-             auto& first = trackStateCandidates.front();
-             ts.shareFrom(first, PM::Predicted);
-             ts.shareFrom(first, PM::Jacobian);
-          }
-          ts.pathLength() = pathLength;
+        if (firstTrackState.has_value()) {
+          // subsequent track states don't need storage for these as they will
+          // be shared
+          mask &= ~PM::Predicted & ~PM::Jacobian;
+        }
 
-          ts.setReferenceSurface(boundParams.referenceSurface().getSharedPtr());
-          ts.setProjectorBitset(projector_bitset); // @TODO needed ?
-          ts.setUncalibratedSourceLink(compatible_measurements->getSlot(idx).m_sourceLink.value());
+        if (a_compatible_measurement.m_isOutLier) {
+          // outlier won't have separate filtered parameters
+          mask &= ~PM::Filtered;
+        }
 
-          // @TODO set sourcelink
-          std::visit<void>( MeasurementSetter{&ts}, compatible_measurements->getSlot(idx).m_measurement);
-          trackStateCandidates.push_back(ts);
-       }
-       return
-       (trackStateCandidates.begin() != trackStateCandidates.end())
-        ? Acts::Result<std::pair<
-                          typename std::vector<typename T_BaseTypes::TrackStateProxy>::iterator,
-                          typename std::vector<typename T_BaseTypes::TrackStateProxy>::iterator> >
-             ::success(std::make_pair(trackStateCandidates.begin(), trackStateCandidates.end()))
-       : Acts::Result<std::pair<
-                          typename std::vector<typename T_BaseTypes::TrackStateProxy>::iterator,
-                          typename std::vector<typename T_BaseTypes::TrackStateProxy>::iterator> >
-             ::failure(Acts::CombinatorialKalmanFilterError::MeasurementSelectionFailed); // @TODO no compatible candidates == error ?
+        typename T_BaseTypes::TrackStateProxy trackState = trajectory.makeTrackState(mask, prevTip);
+        ACTS_VERBOSE("Create SourceLink output track state #"
+                     << trackState.index() << " with mask: " << mask);
+
+        if (firstTrackState.has_value()) {
+          trackState.shareFrom(*firstTrackState, PM::Predicted);
+          trackState.shareFrom(*firstTrackState, PM::Jacobian);
+        }
+        else {
+           // only set these for first
+           trackState.predicted() = boundParams.parameters();
+           if (boundParams.covariance()) {
+              trackState.predictedCovariance() = *boundParams.covariance();
+           }
+           trackState.jacobian() = std::get<1>(boundState);
+           firstTrackState = trackState;
+        }
+        trackState.pathLength() = pathLength;
+
+        trackState.setReferenceSurface(boundParams.referenceSurface().getSharedPtr());
+        trackState.setProjectorBitset(projector_bitset); // @TODO needed ?
+        trackState.setUncalibratedSourceLink(a_compatible_measurement.m_sourceLink.value());
+
+        std::visit<void>( MeasurementSetter{&trackState}, a_compatible_measurement.m_measurement);
+
+        Acts::TrackStateType typeFlags = trackState.typeFlags();
+        if (trackState.referenceSurface().surfaceMaterial() != nullptr) {
+           typeFlags.set(Acts::TrackStateFlag::MaterialFlag);
+        }
+        typeFlags.set(Acts::TrackStateFlag::ParameterFlag);
+        if (a_compatible_measurement.m_isOutLier) {
+           // flag outliers accordingly, so that they are handled correctly by the post processing
+           typeFlags.set(Acts::TrackStateFlag::OutlierFlag);
+        }
+
+        // @TODO these track states still need some additional processing. Should there be a special
+        //       flag for this ?
+        track_states.push_back( trackState.index());
+      }
+      return ret_track_states;
     }
-
-
 };

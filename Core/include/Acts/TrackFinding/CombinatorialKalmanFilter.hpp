@@ -190,9 +190,7 @@ struct CombinatorialKalmanFilterOptions {
 
   using T_BoundState = std::tuple<BoundTrackParameters, BoundMatrix, double>;
   using StateCandidateCreator
-  = Delegate<Result<std::pair<
-                       typename std::vector<typename traj_t::TrackStateProxy>::iterator,
-                       typename std::vector<typename traj_t::TrackStateProxy>::iterator>>
+  = Delegate<Result<boost::container::small_vector< typename traj_t::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface> >
              (const Acts::GeometryContext& geoContext,
               const Acts::CalibrationContext* calibrationContext,
               const Surface& surface,
@@ -200,14 +198,12 @@ struct CombinatorialKalmanFilterOptions {
               source_link_iterator_t slBegin,
               source_link_iterator_t slEnd,
               std::size_t prevTip,
-              traj_t& trajectory,
+              traj_t& buffer_trajectory,
               std::vector<typename traj_t::TrackStateProxy> &trackStateCandidates,
-              bool &isOutlier,
+              traj_t& trajectory,
               const Logger& logger)>;
 
-
   StateCandidateCreator stateCandidateCreator;
-
 
   /// Whether to consider multiple scattering.
   bool multipleScattering = true;
@@ -312,18 +308,22 @@ class CombinatorialKalmanFilter {
   struct CandidateTrackStateCreator {
     typename CombinatorialKalmanFilterExtensions<traj_t>::Calibrator calibrator;
     typename CombinatorialKalmanFilterExtensions<traj_t>::MeasurementSelector measurementSelector;
-    /// Create and fill track states for all source links
+
+    /// Create track states for selected measurements given by the source links
     ///
     /// @param gctx The current geometry context
-    /// @param result Reference to the result struct of the actor
+    /// @param calibrationContext pointer to the current calibration context
+    /// @param surface the surface the sourceLinks are associated to
     /// @param boundState Bound state from the propagation on this surface
-    /// @param prevTip Index pointing at previous trajectory state (i.e. tip)
     /// @param slBegin Begin iterator for sourcelinks
     /// @param slEnd End iterator for sourcelinks
+    /// @param prevTip Index pointing at previous trajectory state (i.e. tip)
+    /// @param buffer_trajectory a buffer for temporary candidate track states
+    /// @param trackStateCandidates a buffer for temporary track state proxies for candidates
+    /// @param trajectory the trajectory to which new track states for selected measurements will be added
+    /// @param logger the logger for messages.
     template <typename source_link_iterator_t>
-    Result<std::pair<
-              typename std::vector<typename traj_t::TrackStateProxy>::iterator,
-              typename std::vector<typename traj_t::TrackStateProxy>::iterator>>
+    Result<boost::container::small_vector< typename traj_t::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface> >
     createSourceLinkTrackStates(const Acts::GeometryContext& gctx,
                                 const Acts::CalibrationContext* calibrationContext,
                                 [[maybe_unused]] const Surface& surface,
@@ -331,10 +331,13 @@ class CombinatorialKalmanFilter {
                                 source_link_iterator_t slBegin,
                                 source_link_iterator_t slEnd,
                                 std::size_t prevTip,
-                                traj_t& trajectory,
+                                traj_t& buffer_trajectory,
                                 std::vector<typename traj_t::TrackStateProxy> &trackStateCandidates,
-                                bool &isOutlier,
+                                traj_t& trajectory,
                                 const Logger& logger) const {
+      using ResultTrackStateList = Acts::Result<boost::container::small_vector< typename traj_t::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface> >;
+      ResultTrackStateList
+         ret_track_states{ boost::container::small_vector< typename traj_t::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface>() };
       const auto& [boundParams, jacobian, pathLength] = boundState;
 
       trackStateCandidates.clear();
@@ -345,7 +348,7 @@ class CombinatorialKalmanFilter {
         trackStateCandidates.reserve(std::distance(slBegin, slEnd));
       }
 
-      trajectory.clear();
+      buffer_trajectory.clear();
 
       using PM = TrackStatePropMask;
 
@@ -367,7 +370,7 @@ class CombinatorialKalmanFilter {
         // CAREFUL! This trackstate has a previous index that is not in this
         // MultiTrajectory Visiting brackwards from this track state will
         // fail!
-        auto ts = trajectory.makeTrackState(mask, prevTip);
+        auto ts = buffer_trajectory.makeTrackState(mask, prevTip);
 
         if (it == slBegin) {
           // only set these for first
@@ -392,7 +395,104 @@ class CombinatorialKalmanFilter {
 
         trackStateCandidates.push_back(ts);
       }
-      return measurementSelector(trackStateCandidates, isOutlier, logger);
+      bool isOutlier=false;
+      Result<std::pair<
+                typename std::vector<typename traj_t::TrackStateProxy>::iterator,
+                typename std::vector<typename traj_t::TrackStateProxy>::iterator>>
+         selectorResult =  measurementSelector(trackStateCandidates, isOutlier, logger);
+      if (!selectorResult.ok()) {
+         ACTS_ERROR("Selection of calibrated measurements failed: "
+                    << selectorResult.error());
+         ret_track_states = ResultTrackStateList::failure(selectorResult.error());
+      }
+      else {
+         auto selectedTrackStateRange = *selectorResult;
+
+         ret_track_states = processSelectedTrackStates(
+            selectedTrackStateRange.first,
+            selectedTrackStateRange.second,  trajectory, isOutlier,
+            logger);
+      }
+
+      return ret_track_states;
+    }
+
+    /// Create track states for the given trajectory from candidate track states
+    ///
+    /// @param begin begin iterator of the list of candidate track states
+    /// @param end end iterator of the list of candidate track states
+    /// @param fittedStates the trajectory to which the new track states are added
+    /// @param isOutlier true if the candidate(s) is(are) an outlier(s).
+    /// @param logger the logger for messages
+    Result<boost::container::small_vector< typename traj_t::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface> >
+    processSelectedTrackStates(
+        typename std::vector<typename traj_t::TrackStateProxy>::const_iterator
+            begin,
+        typename std::vector<typename traj_t::TrackStateProxy>::const_iterator
+            end,
+        traj_t& fittedStates,
+        bool isOutlier,
+        const Logger& logger) const {
+      Acts::Result<boost::container::small_vector< typename traj_t::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface> >
+         ret_track_states{ boost::container::small_vector< typename traj_t::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface>() };
+      boost::container::small_vector< typename traj_t::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface>
+         &track_states = *ret_track_states;
+      track_states.reserve(end-begin);
+      using PM = TrackStatePropMask;
+
+      std::optional<typename traj_t::TrackStateProxy> firstTrackState{
+          std::nullopt};
+      for (auto it = begin; it != end; ++it) {
+        auto& candidateTrackState = *it;
+
+        PM mask = PM::Predicted | PM::Filtered | PM::Jacobian | PM::Calibrated;
+
+        if (it != begin) {
+          // subsequent track states don't need storage for these as they will
+          // be shared
+          mask &= ~PM::Predicted & ~PM::Jacobian;
+        }
+
+        if (isOutlier) {
+          // outlier won't have separate filtered parameters
+          mask &= ~PM::Filtered;
+        }
+
+        // copy this trackstate into fitted states MultiTrajectory
+        typename traj_t::TrackStateProxy trackState =
+            fittedStates.makeTrackState(mask,
+                                               candidateTrackState.previous());
+        ACTS_VERBOSE("Create SourceLink output track state #"
+                     << trackState.index() << " with mask: " << mask);
+
+        if (it != begin) {
+          // assign indices pointing to first track state
+          trackState.shareFrom(*firstTrackState, PM::Predicted);
+          trackState.shareFrom(*firstTrackState, PM::Jacobian);
+        } else {
+          firstTrackState = trackState;
+        }
+
+        // either copy ALL or everything except for predicted and jacobian
+        trackState.allocateCalibrated(candidateTrackState.calibratedSize());
+        trackState.copyFrom(candidateTrackState, mask, false);
+
+        auto typeFlags = trackState.typeFlags();
+        if (trackState.referenceSurface().surfaceMaterial() != nullptr) {
+          typeFlags.set(TrackStateFlag::MaterialFlag);
+        }
+        typeFlags.set(TrackStateFlag::ParameterFlag);
+
+        if (isOutlier) {
+           // propagate information that this is an outlier state
+          ACTS_VERBOSE(
+              "Creating outlier track state with tip = " << trackState.index());
+          // Set the outlier flag needed by the next step to identify outlier states
+          typeFlags.set(TrackStateFlag::OutlierFlag);
+        }
+        track_states.push_back(trackState.index());
+      }
+      return ret_track_states;
     }
   };
    
@@ -654,9 +754,7 @@ class CombinatorialKalmanFilter {
     Result<void> filter(const Surface* surface, propagator_state_t& state,
                         const stepper_t& stepper, const navigator_t& navigator,
                         result_type& result) const {
-      // Initialize the number of branches on current surface
-      std::size_t nBranchesOnSurface = 0;
-
+      std::size_t nBranchesOnSurface=0;
       // Count the number of source links on the surface
       auto [slBegin, slEnd] = m_sourcelinkAccessor(*surface);
       if (slBegin != slEnd) {
@@ -694,33 +792,29 @@ class CombinatorialKalmanFilter {
 
         // Create trackstates for all source links (will be filtered later)
         // Results are stored in result => no return value
-        using TrackStateRangeResult = Result<std::pair<
-                                                typename std::vector<typename traj_t::TrackStateProxy>::iterator,
-                                                typename std::vector<typename traj_t::TrackStateProxy>::iterator>>;
 
-        bool isOutlier = false;
-        TrackStateRangeResult
-           selectorResult = stateCandidateCreator(state.geoContext, calibrationContext, *surface, boundState,
-                                                  slBegin, slEnd, prevTip, *(result.stateBuffer), result.trackStateCandidates, isOutlier, logger());
+        using TrackStatesResult = Acts::Result<boost::container::small_vector< typename traj_t::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface> >;
 
-        //        TrackStateRangeResult selectorResult=createTrackStateCandidates();
-        if (!selectorResult.ok()) {
-          ACTS_ERROR("Selection of calibrated measurements failed: "
-                     << selectorResult.error());
-          return selectorResult.error();
+        TrackStatesResult
+           tsRes = stateCandidateCreator(state.geoContext, calibrationContext, *surface, boundState,
+                                         slBegin, slEnd, prevTip,
+                                         *(result.stateBuffer), result.trackStateCandidates,
+                                         *(result.fittedStates), logger());
+
+        if (!tsRes.ok()) {
+          ACTS_ERROR(
+              "Processing of selected track states failed: " << tsRes.error())
+          return tsRes.error();
         }
-        auto selectedTrackStateRange = *selectorResult;
-
-        auto procRes = processSelectedTrackStates(
-            state.geoContext, selectedTrackStateRange.first,
-            selectedTrackStateRange.second, result, isOutlier, prevTipState,
-            nBranchesOnSurface);
-
+        Result< std::tuple<unsigned int,bool> >
+           procRes = processNewTrackStates(state.geoContext, prevTipState, *tsRes, result);
         if (!procRes.ok()) {
           ACTS_ERROR(
               "Processing of selected track states failed: " << procRes.error())
           return procRes.error();
         }
+        auto [nNewBranchesOnSurface, isOutlier] = *procRes;
+        nBranchesOnSurface = nNewBranchesOnSurface;
 
         if (nBranchesOnSurface > 0 && !isOutlier) {
           // If there are measurement track states on this surface
@@ -843,85 +937,30 @@ class CombinatorialKalmanFilter {
       return Result<void>::success();
     }
 
-
-
-    /// Handle the list of selected track states
-    ///
-    /// @param gctx The current geometry context
-    /// @param begin The start iterator for selected track states
-    /// @param end The end iterator for selected track states
-    /// @param result Reference to the actor result struct
-    /// @param isOutlier If this track state is a single outlier one
-    /// @param prevTipState Tip state prior to this surface
-    /// @param [in,out] nBranchesOnSurface Number of branches on surface, will be updated
-    Result<void> processSelectedTrackStates(
-        const Acts::GeometryContext& gctx,
-        typename std::vector<typename traj_t::TrackStateProxy>::const_iterator
-            begin,
-        typename std::vector<typename traj_t::TrackStateProxy>::const_iterator
-            end,
-        result_type& result, bool isOutlier, const TipState& prevTipState,
-        std::size_t& nBranchesOnSurface) const {
-      using PM = TrackStatePropMask;
-
-      std::optional<typename traj_t::TrackStateProxy> firstTrackState{
-          std::nullopt};
-      for (auto it = begin; it != end; ++it) {
-        auto& candidateTrackState = *it;
-
-        PM mask = PM::Predicted | PM::Filtered | PM::Jacobian | PM::Calibrated;
-
-        if (it != begin) {
-          // subsequent track states don't need storage for these as they will
-          // be shared
-          mask &= ~PM::Predicted & ~PM::Jacobian;
-        }
-
-        if (isOutlier) {
-          // outlier won't have separate filtered parameters
-          mask &= ~PM::Filtered;
-        }
-
-        // copy this trackstate into fitted states MultiTrajectory
-        typename traj_t::TrackStateProxy trackState =
-            result.fittedStates->makeTrackState(mask,
-                                                candidateTrackState.previous());
-        ACTS_VERBOSE("Create SourceLink output track state #"
-                     << trackState.index() << " with mask: " << mask);
-
-        if (it != begin) {
-          // assign indices pointing to first track state
-          trackState.shareFrom(*firstTrackState, PM::Predicted);
-          trackState.shareFrom(*firstTrackState, PM::Jacobian);
-        } else {
-          firstTrackState = trackState;
-        }
-
-        // either copy ALL or everything except for predicted and jacobian
-        trackState.allocateCalibrated(candidateTrackState.calibratedSize());
-        trackState.copyFrom(candidateTrackState, mask, false);
-
-        auto typeFlags = trackState.typeFlags();
-        if (trackState.referenceSurface().surfaceMaterial() != nullptr) {
-          typeFlags.set(TrackStateFlag::MaterialFlag);
-        }
-        typeFlags.set(TrackStateFlag::ParameterFlag);
-
+    // process new, incompomplete track states and set filtered state
+    // will run updator or copy previous state for outliers
+    Result< std::tuple<unsigned int,bool> >
+    processNewTrackStates(const Acts::GeometryContext& gctx,
+                          const TipState &prevTipState,
+                          const boost::container::small_vector< typename traj_t::TrackStateProxy::IndexType, Acts::NMaxBranchesPerSurface> &new_track_states,
+                          result_type& result) const {
+      unsigned int nBranchesOnSurface=0;
+      bool isOutlier=false;
+      for (typename traj_t::TrackStateProxy::IndexType tipIndex : new_track_states) {
         // Inherit the tip state from the previous and will be updated
         // later
+        typename traj_t::TrackStateProxy trackState( result.fittedStates->getTrackState(tipIndex) );
         TipState tipState = prevTipState;
-        std::size_t currentTip = trackState.index();
 
         // Increment of number of processedState and passed sensitive surfaces
         tipState.nSensitiveSurfaces++;
         tipState.nStates++;
 
-        if (isOutlier) {
-          ACTS_VERBOSE(
-              "Creating outlier track state with tip = " << currentTip);
-          // Set the outlier flag
-          typeFlags.set(TrackStateFlag::OutlierFlag);
+        using PM = Acts::TrackStatePropMask;
+        TrackStateType typeFlags( trackState.typeFlags() );
+        if (typeFlags.test(TrackStateFlag::OutlierFlag)) {
           // Increment number of outliers
+          isOutlier=true;
           tipState.nOutliers++;
           // No Kalman update for outlier
           // Set the filtered parameter index to be the same with predicted
@@ -936,7 +975,7 @@ class CombinatorialKalmanFilter {
             return updateRes.error();
           }
           ACTS_VERBOSE(
-              "Creating measurement track state with tip = " << currentTip);
+              "Creating measurement track state with tip = " << tipIndex);
           // Set the measurement flag
           typeFlags.set(TrackStateFlag::MeasurementFlag);
           // Increment number of measurements
@@ -946,12 +985,12 @@ class CombinatorialKalmanFilter {
         // Check if need to stop this branch
         if (!m_extensions.branchStopper(tipState, trackState)) {
           // Put tipstate back into active tips to continue with it
-          result.activeTips.emplace_back(currentTip, tipState);
+          result.activeTips.emplace_back(tipIndex, tipState);
           // Record the number of branches on surface
           nBranchesOnSurface++;
         }
       }
-      return Result<void>::success();
+      return std::make_tuple(nBranchesOnSurface, isOutlier);
     }
 
     /// @brief CombinatorialKalmanFilter actor operation: add a hole or material track state
