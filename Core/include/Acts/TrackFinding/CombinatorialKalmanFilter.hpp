@@ -59,6 +59,26 @@ enum class CombinatorialKalmanFilterBranchStopperResult {
   StopAndKeep,
 };
 
+   namespace Dbg {
+      enum ReportType {
+         CreateStates, //1
+         AllBranchesStopped,//2
+         BranchExtended,//3
+         BranchNoMeasurementsRejected,//4
+         BranchNoMeasurementsKept,//5
+         BranchNoMeasurements,//6
+         BranchKeptContinue,//7
+         BranchKeptStop,//8
+         BranchRejected,//9
+         NeitherMeasurementNorMaterialSurface,//10
+         noSurface,//11
+         endOfWorld,//12
+         pathLimitReached,//13
+         targetReached,//14
+         noActiveBranches//15
+      };
+   }
+
 /// Extension struct which holds the delegates to customize the CKF behavior
 template <typename track_container_t>
 struct CombinatorialKalmanFilterExtensions {
@@ -94,6 +114,10 @@ struct CombinatorialKalmanFilterExtensions {
 
   /// The branch stopper is called during the filtering by the Actor.
   BranchStopper branchStopper{DelegateFuncTag<voidBranchStopper>{}};
+
+  using Reporter =
+     Delegate<void(const TrackProxy&, const TrackStateProxy&, Acts::Dbg::ReportType, unsigned int)>;
+  Reporter reporter;
 
  private:
   /// Default measurement selector which will return all measurements
@@ -588,13 +612,54 @@ class CombinatorialKalmanFilter {
           result.lastError = res.error();
         }
       }
+      else if (m_extensions.reporter) {
+             if (!result.activeBranches.empty()) {
+         auto currentBranch = result.activeBranches.back();
+         auto currentTip = result.activeBranches.back().tipIndex();
+         m_extensions.reporter(currentBranch,
+                               result.trackStates->getTrackState(currentTip),
+                               Acts::Dbg::noSurface,
+                               __LINE__);
+             }
+      }
 
       const bool isEndOfWorldReached =
           endOfWorldReached(state, stepper, navigator, logger());
+      if (isEndOfWorldReached && m_extensions.reporter) {
+             if (!result.activeBranches.empty()) {
+         auto currentBranch = result.activeBranches.back();
+         auto currentTip = result.activeBranches.back().tipIndex();
+         m_extensions.reporter(currentBranch,
+                               result.trackStates->getTrackState(currentTip),
+                               Acts::Dbg::endOfWorld,
+                               __LINE__);
+             }
+      }
       const bool isPathLimitReached =
           result.pathLimitReached(state, stepper, navigator, logger());
+      if (isPathLimitReached && m_extensions.reporter) {
+             if (!result.activeBranches.empty()) {
+         auto currentBranch = result.activeBranches.back();
+         auto currentTip = result.activeBranches.back().tipIndex();
+         m_extensions.reporter(currentBranch,
+                               result.trackStates->getTrackState(currentTip),
+                               Acts::Dbg::pathLimitReached,
+                               __LINE__
+                               );
+             }
+      }
       const bool isTargetReached =
           targetReached(state, stepper, navigator, logger());
+      if (isTargetReached && m_extensions.reporter) {
+             if (!result.activeBranches.empty()) {
+         auto currentBranch = result.activeBranches.back();
+         auto currentTip = result.activeBranches.back().tipIndex();
+         m_extensions.reporter(currentBranch,
+                               result.trackStates->getTrackState(currentTip),
+                               Acts::Dbg::targetReached,
+                               __LINE__);
+             }
+      }
       if (isEndOfWorldReached || isPathLimitReached || isTargetReached) {
         if (isEndOfWorldReached) {
           ACTS_VERBOSE("End of world reached");
@@ -633,6 +698,17 @@ class CombinatorialKalmanFilter {
           ACTS_VERBOSE("Kalman filtering finds "
                        << result.collectedTracks.size() << " tracks");
           result.finished = true;
+          if (isTargetReached && m_extensions.reporter) {
+             if (!result.activeBranches.empty()) {
+             auto currentBranch = result.activeBranches.back();
+             auto currentTip = result.activeBranches.back().tipIndex();
+             m_extensions.reporter(currentBranch,
+                                   result.trackStates->getTrackState(currentTip),
+                                   Acts::Dbg::noActiveBranches,
+                                   __LINE__);
+             }
+          }
+          
         } else {
           ACTS_VERBOSE("Propagation jumps to branch with tip = "
                        << result.activeBranches.back().tipIndex());
@@ -729,6 +805,13 @@ class CombinatorialKalmanFilter {
         auto currentBranch = result.activeBranches.back();
         TrackIndexType prevTip = currentBranch.tipIndex();
 
+        // if (m_extensions.reporter) {
+        //    m_extensions.reporter(currentBranch,
+        //                          result.trackStates->getTrackState(prevTip),
+        //                          Acts::Dbg::CreateStates,
+        //                          __LINE__);
+        // }
+
         // Create trackstates for all source links (will be filtered later)
         using TrackStatesResult =
             Acts::Result<CkfTypes::BranchVector<TrackIndexType>>;
@@ -765,12 +848,23 @@ class CombinatorialKalmanFilter {
           BranchStopperResult branchStopperResult =
               m_extensions.branchStopper(currentBranch, nonSourcelinkState);
 
+          if (m_extensions.reporter) {
+           m_extensions.reporter(currentBranch,
+                                 result.trackStates->getTrackState(currentTip),
+                                 branchStopperResult == BranchStopperResult::Continue
+                                 ? Acts::Dbg::BranchNoMeasurements
+                                 : (  branchStopperResult == BranchStopperResult::StopAndKeep
+                                      ? Acts::Dbg::BranchNoMeasurementsKept
+                                      : Acts::Dbg::BranchNoMeasurementsRejected ),
+                                 __LINE__);
+          }
+
           // Check the branch
           if (branchStopperResult == BranchStopperResult::Continue) {
             // Remembered the active branch and its state
           } else {
             // No branch on this surface
-            nBranchesOnSurface = 0;
+             nBranchesOnSurface = 0;
             if (branchStopperResult == BranchStopperResult::StopAndKeep) {
               storeLastActiveBranch(result);
             }
@@ -792,6 +886,14 @@ class CombinatorialKalmanFilter {
             // the end of the function
             ACTS_VERBOSE("All branches on surface " << surface->geometryId()
                                                     << " have been stopped");
+
+          if (m_extensions.reporter) {
+           m_extensions.reporter(currentBranch,
+                                 result.trackStates->getTrackState(prevTip),
+                                 Acts::Dbg::AllBranchesStopped,
+                                 __LINE__);
+          }
+            
           } else {
             // `currentBranch` is invalidated after `processNewTrackStates`
             currentBranch = result.activeBranches.back();
@@ -819,6 +921,13 @@ class CombinatorialKalmanFilter {
                            << ts.filtered().transpose()
                            << " of track state with tip = " << ts.index());
             }
+
+          if (m_extensions.reporter) {
+           m_extensions.reporter(currentBranch,
+                                 result.trackStates->getTrackState(prevTip),
+                                 Acts::Dbg::BranchExtended,
+                                 __LINE__);
+          }
           }
         }
 
@@ -876,6 +985,17 @@ class CombinatorialKalmanFilter {
           BranchStopperResult branchStopperResult =
               m_extensions.branchStopper(currentBranch, nonSourcelinkState);
 
+          if (m_extensions.reporter)
+          {
+             auto current_state  = result.trackStates->getTrackState(currentTip);
+          m_extensions.reporter(currentBranch,
+                                current_state,
+                                branchStopperResult == BranchStopperResult::Continue
+                                ? Acts::Dbg::BranchKeptContinue
+                                : (branchStopperResult == BranchStopperResult::StopAndKeep ? Acts::Dbg::BranchKeptStop : Acts::Dbg::BranchRejected ),
+                                __LINE__);
+          }
+          
           // Check the branch
           if (branchStopperResult == BranchStopperResult::Continue) {
             // Remembered the active branch and its state
@@ -897,6 +1017,17 @@ class CombinatorialKalmanFilter {
         // Neither measurement nor material on surface, this branch is still
         // valid. Count the branch on current surface
         nBranchesOnSurface = 1;
+        if (m_extensions.reporter) {
+           if (!result.activeBranches.empty()) {
+              auto currentBranch = result.activeBranches.back();
+              TrackIndexType prevTip = currentBranch.tipIndex();
+              m_extensions.reporter(currentBranch,
+                                    result.trackStates->getTrackState(prevTip),
+                                    Acts::Dbg::NeitherMeasurementNorMaterialSurface,
+                                    __LINE__
+                                    );
+           }
+        }
       }
 
       // Reset current branch if there is no branch on current surface
