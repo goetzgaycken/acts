@@ -657,40 +657,6 @@ class Navigator {
         return true;
       }
       ++state.navigation.navSurfaceIndex;
-      static const std::array<std::size_t,23> geoID = {
-         1585267756029461248,
-         1585267756029461504,
-         1585267618590573312,
-         1585267618590573568,
-         1585267481151619840,
-         1585267481151620096,
-         1585267343712715520,
-         1585267343712715776,
-         1585267206273582336,
-         1585267206273582592,
-         576464325716219904,
-         576464188277266432,
-         576464050838308352,
-         576463913399354880,
-         576464325716220160,
-         576464188277266688,
-         576464050838308608,
-         576463913399355136,
-         936750646638415872,
-         1008807553481577984,
-         1080865010080549632,
-         1080865010080549888,
-         648518483780306176
-      };
-
-      if (state.navigation.navSurfaceIndex != state.navigation.navSurfaces.size() && state.navigation.navSurface().object()) {
-         if (std::find(geoID.begin(),geoID.end(), state.navigation.navSurface().object()->geometryId().value())!=geoID.end()) {
-            std::size_t geo_id = state.navigation.navSurface().object()->geometryId().value();
-            (void) geo_id;
-            std::cout <<"DEBUG Navigator " << __LINE__ << " geo " << state.navigation.navSurface().object()->geometryId() << " [" << state.navigation.navSurface().object()->geometryId().value() << "]" << std::endl;
-         }
-      }
-      
       continue;
     }
 
@@ -1104,40 +1070,6 @@ class Navigator {
     if (!state.navigation.navSurfaces.empty()) {
       // set the index
       state.navigation.navSurfaceIndex = 0;
-      static const std::array<std::size_t,23> geoID = {
-         1585267756029461248,
-         1585267756029461504,
-         1585267618590573312,
-         1585267618590573568,
-         1585267481151619840,
-         1585267481151620096,
-         1585267343712715520,
-         1585267343712715776,
-         1585267206273582336,
-         1585267206273582592,
-         576464325716219904,
-         576464188277266432,
-         576464050838308352,
-         576463913399354880,
-         576464325716220160,
-         576464188277266688,
-         576464050838308608,
-         576463913399355136,
-         936750646638415872,
-         1008807553481577984,
-         1080865010080549632,
-         1080865010080549888,
-         648518483780306176
-      };
-
-      if (state.navigation.navSurfaceIndex != state.navigation.navSurfaces.size() && state.navigation.navSurface().object()) {
-         if (std::find(geoID.begin(),geoID.end(), state.navigation.navSurface().object()->geometryId().value())!=geoID.end()) {
-            std::size_t geo_id = state.navigation.navSurface().object()->geometryId().value();
-            (void) geo_id;
-            std::cout <<"DEBUG Navigator " << __LINE__ << " geo " << state.navigation.navSurface().object()->geometryId() << " [" << state.navigation.navSurface().object()->geometryId().value() << "]" << std::endl;
-         }
-      }
-      
       // The stepper updates the step size ( single / multi component)
       stepper.updateStepSize(state.stepping, state.navigation.navSurface(),
                              state.options.direction, true);

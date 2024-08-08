@@ -589,42 +589,8 @@ class CombinatorialKalmanFilter {
 
       // Update:
       // - Waiting for a current surface
-      auto surface = navigator.currentSurface(state.navigation);
-      static const std::array<std::size_t,23> geoID = {
-         1585267756029461248,
-         1585267756029461504,
-         1585267618590573312,
-         1585267618590573568,
-         1585267481151619840,
-         1585267481151620096,
-         1585267343712715520,
-         1585267343712715776,
-         1585267206273582336,
-         1585267206273582592,
-         576464325716219904,
-         576464188277266432,
-         576464050838308352,
-         576463913399354880,
-         576464325716220160,
-         576464188277266688,
-         576464050838308608,
-         576463913399355136,
-         936750646638415872,
-         1008807553481577984,
-         1080865010080549632,
-         1080865010080549888,
-         648518483780306176
-      };
-
-      if (surface) {
-         if (std::find(geoID.begin(),geoID.end(), surface->geometryId().value())!=geoID.end()) {
-            std::size_t geo_id = surface->geometryId().value();
-            (void) geo_id;
-            std::cout <<"DEBUG CombinatorialKalmanFilter " << __LINE__ << " geo " << surface->geometryId() << " [" << surface->geometryId().value() << "]" << std::endl;
-         }
-      }
-      
-      if (surface != nullptr) {
+      if (auto surface = navigator.currentSurface(state.navigation);
+          surface != nullptr) {
         // There are three scenarios:
         // 1) The surface is in the measurement map
         // -> Select source links
@@ -812,16 +778,8 @@ class CombinatorialKalmanFilter {
       using PM = TrackStatePropMask;
 
       std::size_t nBranchesOnSurface = 0;
-      std::stringstream msg;
-      auto [slBegin, slEnd] = m_sourcelinkAccessor(*surface);
-      msg << "DEBUG CombinatorialKalmanFilter::filter " << ( surface ? surface->geometryId().value() : 0u )
-          << (slBegin !=slEnd ? " has measurements " : " no measurements")
-          << (surface && (surface->associatedDetectorElement() != nullptr) ? " sensitive"
-              : (surface  && surface->surfaceMaterial() != nullptr ? " material" : " non-material-passive"))
-          << std::endl;
-      std::cout << msg.str() << std::flush;
 
-      if (
+      if (auto [slBegin, slEnd] = m_sourcelinkAccessor(*surface);
           slBegin != slEnd) {
         // Screen output message
         ACTS_VERBOSE("Measurement surface " << surface->geometryId()
@@ -1130,43 +1088,7 @@ class CombinatorialKalmanFilter {
       for (TrackProxy newBranch : newBranches) {
         auto trackState = newBranch.outermostTrackState();
         TrackStateType typeFlags = trackState.typeFlags();
-  static const std::array<std::size_t,23> geoID = {
-     1585267756029461248,
-1585267756029461504,
-1585267618590573312,
-1585267618590573568,
-1585267481151619840,
-1585267481151620096,
-1585267343712715520,
-1585267343712715776,
-1585267206273582336,
-1585267206273582592,
-576464325716219904,
-576464188277266432,
-576464050838308352,
-576463913399354880,
-576464325716220160,
-576464188277266688,
-576464050838308608,
-576463913399355136,
-936750646638415872,
-1008807553481577984,
-1080865010080549632,
-1080865010080549888,
-648518483780306176
-  };
 
-           if (std::find(geoID.begin(),geoID.end(), trackState.referenceSurface().geometryId().value())!=geoID.end()) {
-            std::size_t geo_id = trackState.referenceSurface().geometryId().value();
-            (void) geo_id;
-            std::cout <<"DEBUG CombinatorialKalmanFilter " << __LINE__ << " new state geo " << trackState.referenceSurface().geometryId() << " [" << trackState.referenceSurface().geometryId().value()
-                      << "]"
-                      << (typeFlags.test(TrackStateFlag::OutlierFlag) ?  " outlier " : "" )
-                      << (typeFlags.test(TrackStateFlag::MeasurementFlag) ? " measurement " : "")
-                      << std::endl;
-           }
-
-        
         if (typeFlags.test(TrackStateFlag::OutlierFlag)) {
           // No Kalman update for outlier
           // Set the filtered parameter index to be the same with predicted
@@ -1203,16 +1125,6 @@ class CombinatorialKalmanFilter {
           // Record the number of branches on surface
           nBranchesOnSurface++;
         } else {
-           if (std::find(geoID.begin(),geoID.end(), trackState.referenceSurface().geometryId().value())!=geoID.end()) {
-            std::size_t geo_id = trackState.referenceSurface().geometryId().value();
-            (void) geo_id;
-            std::cout <<"DEBUG CombinatorialKalmanFilter " << __LINE__ << " new state geo " << trackState.referenceSurface().geometryId() << " [" << trackState.referenceSurface().geometryId().value()
-                      << "]"
-                      << (typeFlags.test(TrackStateFlag::OutlierFlag) ?  " outlier " : "" )
-                      << (typeFlags.test(TrackStateFlag::MeasurementFlag) ? " measurement " : "")
-                      << (branchStopperResult == BranchStopperResult::StopAndKeep ? " stop-and-keep " : " reject")
-                      << std::endl;
-           }
           // Record the number of stopped branches
           if (branchStopperResult == BranchStopperResult::StopAndKeep) {
             storeLastActiveBranch(result);

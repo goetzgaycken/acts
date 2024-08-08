@@ -17,9 +17,6 @@
 #include "Acts/Utilities/Intersection.hpp"
 #include "Acts/Utilities/Logger.hpp"
 
-#include <sstream>
-#include <iostream>
-
 #include <limits>
 
 namespace Acts::detail {
@@ -42,51 +39,17 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
     const Logger& logger) {
   ACTS_VERBOSE("Update single surface status for surface: "
                << surface.geometryId() << " index " << static_cast<int>(index));
-  static const std::array<std::size_t,23> geoID = {
-     1585267756029461248,
-        1585267756029461504,
-        1585267618590573312,
-        1585267618590573568,
-        1585267481151619840,
-        1585267481151620096,
-        1585267343712715520,
-        1585267343712715776,
-        1585267206273582336,
-        1585267206273582592,
-        576464325716219904,
-        576464188277266432,
-        576464050838308352,
-        576463913399354880,
-        576464325716220160,
-        576464188277266688,
-        576464050838308608,
-        576463913399355136,
-        936750646638415872,
-        1008807553481577984,
-        1080865010080549632,
-        1080865010080549888,
-        648518483780306176
-  };
 
   auto sIntersection =
       surface.intersect(state.geoContext, stepper.position(state),
                         navDir * stepper.direction(state), boundaryTolerance,
                         surfaceTolerance)[index];
-  if (std::find(geoID.begin(),geoID.end(), surface.geometryId().value())!=geoID.end()) {
-     std::size_t geo_id = surface.geometryId().value();
-     (void) geo_id;
-     std::cout <<"DEBUG SteppingHelper " << __LINE__ << " geo " << surface.geometryId() << " [" << surface.geometryId().value() << "]" << std::endl;
-  }
 
-  std::stringstream out;
-  out << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId() << " [" << surface.geometryId().value() << "] ";
   // The intersection is on surface already
   if (sIntersection.status() == Intersection3D::Status::onSurface) {
     // Release navigation step size
     state.stepSize.release(ConstrainedStep::actor);
     ACTS_VERBOSE("Intersection: state is ON SURFACE");
-    out << " on-surface" << std::endl;
-    std::cout << out.str() << std::flush;
     return Intersection3D::Status::onSurface;
   }
 
@@ -99,14 +62,10 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
     ACTS_VERBOSE("Surface is reachable");
     stepper.updateStepSize(state, sIntersection.pathLength(),
                            ConstrainedStep::actor);
-    out << " reachabele " << nearLimit << " " << sIntersection.pathLength() <<  " < " << farLimit << std::endl;
-    std::cout << out.str() << std::flush;
     return Intersection3D::Status::reachable;
   }
 
   ACTS_VERBOSE("Surface is NOT reachable");
-  out << " not reachable" << std::endl;
-  std::cout << out.str() << std::flush;
   return Intersection3D::Status::unreachable;
 }
 
