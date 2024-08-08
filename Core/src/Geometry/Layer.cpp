@@ -24,36 +24,41 @@
 #include <sstream>
 #include <iostream>
 #include <cmath>
+#include <atomic>
 
 namespace Dbg {
    struct InstanceCounter {
+      InstanceCounter(std::string &&name) :m_name(std::move(name)) {}
       ~InstanceCounter() {
          std::stringstream msg;
-         msg << "DEBUG Layer Surface/Bounds intance counter:: max surface types: " << m_nSurfaceTypes.value()
-             << " max bound types: " << m_nBoundTypes.value()
-             << " max bound instances: " << m_nBoundInstances.value()
-             << " n-surfaces: " << (m_nSurfacesN.value() > 0 ? m_nSurfacesSum.value() / m_nSurfacesN.value() : 0)
-             << " +- << (m_nSurfacesN.value() > 1
-                         ? sqrt((m_nSurfacesSum2.value()- m_nSurfacesSum.value() * m_nSurfacesSum.value() / m_nSurfacesN.value())  / (m_nSurfacesN.value()-1))
-                         : 0)
-             << " < " << m_nSurfaceTypes.value()
+         msg << "DEBUG Layer Surface/Bounds intance counter " << m_name << " :: max surface types: " << m_nSurfaceTypes
+             << " max bound types: " << m_nBoundTypes
+             << " max bound instances: " << m_nBoundInstances
+             << " max bound values: " << m_nBoundValues
+             << " n-surfaces: " << (m_nSurfacesN > 0 ? m_nSurfacesSum / m_nSurfacesN : 0)
+             << " +- " << (m_nSurfacesN > 1
+                           ? sqrt((m_nSurfacesSum2 - m_nSurfacesSum * m_nSurfacesSum / m_nSurfacesN)  / (m_nSurfacesN-1))
+                           : 0)
+             << " < " << m_nSurfacesMax
              << std::endl;
+         std::cout << msg.str() << std::flush;
       }
       void update( std::atomic<unsigned int> &max_val, unsigned int val) {
          for (;;) {
-            unsigned int current = max_val.value();
+            unsigned int current = max_val;
             if (current >= val || max_val.compare_exchange_weak(current, val)) break;
          }
       }
       void updateNSurfaces(unsigned int n_surfaces) {
-         update(m_nSurfaces, n_surfaces);
-         m_nSurfacesSum += n_sufaces;
-         m_nSurfacesSum2 += n_sufaces*n_sufaces;
+         update(m_nSurfacesMax, n_surfaces);
+         m_nSurfacesSum += n_surfaces;
+         m_nSurfacesSum2 += n_surfaces*n_surfaces;
          ++m_nSurfacesN;
       }
       void updateNSurfaceTypes(unsigned int n_surface_types) { update(m_nSurfaceTypes, n_surface_types); }
       void updateNBoundTypes(unsigned int n_bound_types) { update(m_nBoundTypes, n_bound_types); }
       void updateNBoundInstances(unsigned int n_bound_instances) { update(m_nBoundInstances, n_bound_instances); }
+      void updateNBoundValues(unsigned int n_bound_values) { update(m_nBoundValues, n_bound_values); }
       std::atomic<unsigned int> m_nSurfacesMax{};
       std::atomic<unsigned int> m_nSurfacesSum{};
       std::atomic<unsigned int> m_nSurfacesSum2{};
@@ -61,9 +66,23 @@ namespace Dbg {
       std::atomic<unsigned int> m_nSurfaceTypes{};
       std::atomic<unsigned int> m_nBoundTypes{};
       std::atomic<unsigned int> m_nBoundInstances{};
+      std::atomic<unsigned int> m_nBoundValues{};
+      std::string m_name;
    };
 
-   std::unique_ptr<InstanceCounter> g_InstanceCounter = std::make_unique<InstanceCounter>();
+   enum {
+      kApproach,
+      kSensitive,
+      kLayerSurfaces,
+      kNSurfaceCategories
+   };
+   std::array<std::unique_ptr<InstanceCounter>,kNSurfaceCategories> g_InstanceCounter {
+      std::make_unique<InstanceCounter>("approach"),
+      std::make_unique<InstanceCounter>("sensitive"),
+      std::make_unique<InstanceCounter>("layer")
+   };
+   std::atomic<unsigned int> g_counter{};
+   std::atomic<unsigned int> g_callCounter{};
 }
 
 Acts::Layer::Layer(std::unique_ptr<SurfaceArray> surfaceArray, double thickness,
@@ -227,32 +246,70 @@ Acts::Layer::compatibleSurfaces(
   unsigned int n_surface_types{};
   unsigned int n_bound_types{};
   unsigned int n_bound_instances{};
+  unsigned int n_bound_values{};
   std::array<std::size_t,8> surface_types;
   std::array<std::size_t,8> bound_types;
-  std::array<const void *,8> bound_instances;
+  std::array<const void *,16> bound_instances;
+  std::array<std::vector<double>,16> bound_values;
+  std::size_t a_geo_id{};
+  
   // [&sIntersections, &options, &parameters
   auto processSurface = [&](const Surface& sf, bool sensitive = false) {
+    a_geo_id = sf.geometryId().value();
     std::size_t surface_type_hash =  typeid(sf).hash_code();
     ++n_surfaces;
-    if (n_surface_types<8) {
+    if (n_surface_types<surface_types.size()) {
     if (std::find(surface_types.begin(),surface_types.begin()+n_surface_types, surface_type_hash)==surface_types.begin()+n_surface_types) {
        surface_types[n_surface_types]=surface_type_hash;
        ++n_surface_types;
     }
     }
-    if (n_bound_types<8) {
+    if (n_bound_types<bound_types.size()) {
     std::size_t bound_type_hash =  typeid(sf.bounds()).hash_code();
     if (std::find(bound_types.begin(),bound_types.begin()+n_bound_types, bound_type_hash)==bound_types.begin()+n_bound_types) {
        bound_types[n_bound_types]=bound_type_hash;
        ++n_bound_types;
     }
     }
-    if (n_bound_instances<8) {
+    if (n_bound_instances<bound_instances.size()) {
     const void *bound_instance =  &sf.bounds();
     if (std::find(bound_instances.begin(),bound_instances.begin()+n_bound_instances, bound_instance)==bound_instances.begin()+n_bound_instances) {
        bound_instances[n_bound_instances]=bound_instance;
        ++n_bound_instances;
     }
+    }
+    if (n_bound_values<bound_values.size()) {
+       std::vector<double> this_bound_values =  sf.bounds().values();
+       bool have=false;
+       for (unsigned int idx=0; idx < n_bound_values; ++idx) {
+          if (this_bound_values.size() == bound_values[idx].size()) {
+             bool agree=true;
+             for (unsigned int val_i=0; val_i<bound_values[idx].size(); ++val_i) {
+                if (bound_values[idx][val_i]!=this_bound_values[val_i]) {
+                   agree=false;
+                   break;
+                }
+             }
+             if (agree) {
+                have=true;
+                break;
+             }
+          }
+       }
+       if (!have) {
+          bound_values[n_bound_values]=std::move(this_bound_values);
+          if (Dbg::g_counter < 6000) {
+             std::stringstream msg;
+             msg << "DEBUG bound_values call " << Dbg::g_callCounter << " n=" << bound_values[n_bound_values].size() << ":";
+             for (const double &elm : bound_values[n_bound_values]) {
+                msg << std::setw(12) << elm;
+             }
+             msg<<std::endl;
+             std::cout << msg.str() << std::flush;
+             ++Dbg::g_counter;
+          }
+          ++n_bound_values;
+       }
     }
     
     // veto if it's start surface
@@ -295,6 +352,18 @@ Acts::Layer::compatibleSurfaces(
     for (auto& aSurface : approachSurfaces) {
       processSurface(*aSurface);
     }
+    Dbg::g_InstanceCounter[Dbg::kApproach]->updateNSurfaces(n_surfaces);
+    Dbg::g_InstanceCounter[Dbg::kApproach]->updateNSurfaceTypes(n_surface_types);
+    Dbg::g_InstanceCounter[Dbg::kApproach]->updateNBoundTypes(n_bound_types);
+    Dbg::g_InstanceCounter[Dbg::kApproach]->updateNBoundInstances(n_bound_instances);
+    Dbg::g_InstanceCounter[Dbg::kApproach]->updateNBoundValues(n_bound_values);
+
+    a_geo_id=0u;
+    n_surfaces=0;
+    n_surface_types=0;
+    n_bound_types=0;
+    n_bound_instances=0;
+    n_bound_values=0;
   }
 
   // (B) sensitive surface section
@@ -311,6 +380,23 @@ Acts::Layer::compatibleSurfaces(
     for (auto& sSurface : sensitiveSurfaces) {
       processSurface(*sSurface, true);
     }
+    Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNSurfaces(n_surfaces);
+    Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNSurfaceTypes(n_surface_types);
+    Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNBoundTypes(n_bound_types);
+    Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNBoundInstances(n_bound_instances);
+    Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNBoundValues(n_bound_values);
+    if (n_surfaces>100) {
+       std::stringstream msg;
+       msg << "DEBUG many surfaces " << n_surfaces << " : " << std::hex << a_geo_id << std::dec << std::endl;
+       std::cout << msg.str() << std::flush;
+    }
+
+    a_geo_id=0u;
+    n_surfaces=0;
+    n_surface_types=0;
+    n_bound_types=0;
+    n_bound_instances=0;
+    n_bound_values=0;
   }
 
   // (C) representing surface section
@@ -318,11 +404,19 @@ Acts::Layer::compatibleSurfaces(
   // the layer surface itself is a testSurface
   const Surface* layerSurface = &surfaceRepresentation();
   processSurface(*layerSurface);
+  Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNSurfaces(n_surfaces);
+  Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNSurfaceTypes(n_surface_types);
+  Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNBoundTypes(n_bound_types);
+  Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNBoundInstances(n_bound_instances);
+  Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNBoundValues(n_bound_values);
   
-  Dbg::g_InstanceCounter->updateNSurfaces(n_surfaces);
-  Dbg::g_InstanceCounter->updateNSurfaceTypes(n_surface_types);
-  Dbg::g_InstanceCounter->updateNBoundTypes(n_bound_types);
-  Dbg::g_InstanceCounter->updateNBoundInstances(n_bound_instances);
+  a_geo_id=0u;
+  n_surfaces=0;
+  n_surface_types=0;
+  n_bound_types=0;
+  n_bound_instances=0;
+  n_bound_values=0;
+  ++Dbg::g_callCounter;
   
   return sIntersections;
 }
