@@ -20,6 +20,8 @@
 #include <functional>
 #include <iterator>
 #include <vector>
+#include <sstream>
+#include <iostream>
 
 Acts::Layer::Layer(std::unique_ptr<SurfaceArray> surfaceArray, double thickness,
                    std::unique_ptr<ApproachDescriptor> ades, LayerType laytyp)
@@ -116,8 +118,12 @@ Acts::Layer::compatibleSurfaces(
   // the list of valid intersection
   boost::container::small_vector<SurfaceIntersection, 10> sIntersections;
 
+  std::stringstream out;
+  out << "DEBUG compatibleSurfaces pos " << position[0] << " " << position[1] << " " << position[2] << " ";
   // fast exit - there is nothing to
   if (!m_surfaceArray || !m_approachDescriptor) {
+     out << std::endl;
+     std::cout << out.str() << std::flush;
     return sIntersections;
   }
 
@@ -139,9 +145,12 @@ Acts::Layer::compatibleSurfaces(
     // indicates wrong direction or faulty setup
     // -> do not return compatible surfaces since they may lead you on a wrong
     // navigation path
+    out << " intersect w. endObj " << (endInter.isValid() ? " valid  " : " not-intersecting");
     if (endInter.isValid()) {
       farLimit = endInter.pathLength();
     } else {
+       out << std::endl;
+       std::cout << out.str() << std::flush;
       return sIntersections;
     }
   } else {
@@ -177,6 +186,7 @@ Acts::Layer::compatibleSurfaces(
     return options.resolvePassive;
   };
 
+  out << std::endl;
   // lemma 1 : check and fill the surface
   // [&sIntersections, &options, &parameters
   auto processSurface = [&](const Surface& sf, bool sensitive = false) {
@@ -197,6 +207,11 @@ Acts::Layer::compatibleSurfaces(
     // the surface intersection
     SurfaceIntersection sfi =
         sf.intersect(gctx, position, direction, boundaryTolerance).closest();
+    out << "DEBUG processSurface pos " << position[0] << " " << position[1] << " " << position[2] << " intersect with "
+        <<  sf.geometryId().value() << ( sfi.isValid() ? " intersecting " : " not-intersecting")
+        << (detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) ? "" : " pathlegnth-check-failed")
+        << (isUnique(sfi) ? "" : " not unique") << std::endl;
+    
     if (sfi.isValid() &&
         detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) &&
         isUnique(sfi)) {
@@ -244,6 +259,12 @@ Acts::Layer::compatibleSurfaces(
   const Surface* layerSurface = &surfaceRepresentation();
   processSurface(*layerSurface);
 
+  out << "DEBUG processSurface pos " << position[0] << " " << position[1] << " " << position[2] << " intersections: ";
+  for (const auto &elm : sIntersections) {
+     out << ", " << elm.object()->geometryId().value();
+  }
+  out << std::endl;
+  std::cout << out.str() << std::flush;
   return sIntersections;
 }
 
