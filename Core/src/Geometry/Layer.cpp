@@ -327,12 +327,23 @@ Acts::Layer::compatibleSurfaces(
       boundaryTolerance = BoundaryTolerance::Infinite();
     }
     // the surface intersection
+    try {
     SurfaceIntersection sfi =
         sf.intersect(gctx, position, direction, boundaryTolerance).closest();
     if (sfi.isValid() &&
         detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) &&
         isUnique(sfi)) {
       sIntersections.push_back(sfi);
+    }
+    }
+    catch (...) {
+    SurfaceIntersection sfi =
+        sf.intersect(gctx, position, direction, BoundaryTolerance::None()).closest();
+    if (sfi.isValid() &&
+        detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) &&
+        isUnique(sfi)) {
+      sIntersections.push_back(sfi);
+    }
     }
   };
 

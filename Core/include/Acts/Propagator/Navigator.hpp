@@ -19,6 +19,7 @@
 #include "Acts/Utilities/Logger.hpp"
 #include "Acts/Utilities/StringHelpers.hpp"
 
+#include "Acts/Definitions/Units.hpp"
 #include <sstream>
 #include <string>
 
@@ -1030,6 +1031,8 @@ class Navigator {
     navOpts.resolvePassive = m_cfg.resolvePassive;
     navOpts.startObject = state.navigation.currentSurface;
     navOpts.endObject = state.navigation.targetSurface;
+    double tol1mm= 1.*Acts::UnitConstants::mm ;
+    navOpts.boundaryTolerance = BoundaryTolerance::AbsoluteCartesian{tol1mm,tol1mm};
 
     std::vector<GeometryIdentifier> externalSurfaces;
     if (!state.navigation.options.externalSurfaces.empty()) {
