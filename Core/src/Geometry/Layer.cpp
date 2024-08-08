@@ -22,6 +22,48 @@
 #include <vector>
 #include <sstream>
 #include <iostream>
+#include <cmath>
+
+namespace Dbg {
+   struct InstanceCounter {
+      ~InstanceCounter() {
+         std::stringstream msg;
+         msg << "DEBUG Layer Surface/Bounds intance counter:: max surface types: " << m_nSurfaceTypes.value()
+             << " max bound types: " << m_nBoundTypes.value()
+             << " max bound instances: " << m_nBoundInstances.value()
+             << " n-surfaces: " << (m_nSurfacesN.value() > 0 ? m_nSurfacesSum.value() / m_nSurfacesN.value() : 0)
+             << " +- << (m_nSurfacesN.value() > 1
+                         ? sqrt((m_nSurfacesSum2.value()- m_nSurfacesSum.value() * m_nSurfacesSum.value() / m_nSurfacesN.value())  / (m_nSurfacesN.value()-1))
+                         : 0)
+             << " < " << m_nSurfaceTypes.value()
+             << std::endl;
+      }
+      void update( std::atomic<unsigned int> &max_val, unsigned int val) {
+         for (;;) {
+            unsigned int current = max_val.value();
+            if (current >= val || max_val.compare_exchange_weak(current, val)) break;
+         }
+      }
+      void updateNSurfaces(unsigned int n_surfaces) {
+         update(m_nSurfaces, n_surfaces);
+         m_nSurfacesSum += n_sufaces;
+         m_nSurfacesSum2 += n_sufaces*n_sufaces;
+         ++m_nSurfacesN;
+      }
+      void updateNSurfaceTypes(unsigned int n_surface_types) { update(m_nSurfaceTypes, n_surface_types); }
+      void updateNBoundTypes(unsigned int n_bound_types) { update(m_nBoundTypes, n_bound_types); }
+      void updateNBoundInstances(unsigned int n_bound_instances) { update(m_nBoundInstances, n_bound_instances); }
+      std::atomic<unsigned int> m_nSurfacesMax{};
+      std::atomic<unsigned int> m_nSurfacesSum{};
+      std::atomic<unsigned int> m_nSurfacesSum2{};
+      std::atomic<unsigned int> m_nSurfacesN{};
+      std::atomic<unsigned int> m_nSurfaceTypes{};
+      std::atomic<unsigned int> m_nBoundTypes{};
+      std::atomic<unsigned int> m_nBoundInstances{};
+   };
+
+   std::unique_ptr<InstanceCounter> g_InstanceCounter = std::make_unique<InstanceCounter>();
+}
 
 Acts::Layer::Layer(std::unique_ptr<SurfaceArray> surfaceArray, double thickness,
                    std::unique_ptr<ApproachDescriptor> ades, LayerType laytyp)
@@ -188,8 +230,38 @@ Acts::Layer::compatibleSurfaces(
 
   out << std::endl;
   // lemma 1 : check and fill the surface
+  unsigned int n_surfaces{};
+  unsigned int n_surface_types{};
+  unsigned int n_bound_types{};
+  unsigned int n_bound_instances{};
+  std::array<std::size_t,8> surface_types;
+  std::array<std::size_t,8> bound_types;
+  std::array<const void *,8> bound_instances;
   // [&sIntersections, &options, &parameters
   auto processSurface = [&](const Surface& sf, bool sensitive = false) {
+    std::size_t surface_type_hash =  typeid(sf).hash_code();
+    ++n_surfaces;
+    if (n_surface_types<8) {
+    if (std::find(surface_types.begin(),surface_types.begin()+n_surface_types, surface_type_hash)==surface_types.begin()+n_surface_types) {
+       surface_types[n_surface_types]=surface_type_hash;
+       ++n_surface_types;
+    }
+    }
+    if (n_bound_types<8) {
+    std::size_t bound_type_hash =  typeid(sf.bounds()).hash_code();
+    if (std::find(bound_types.begin(),bound_types.begin()+n_bound_types, bound_type_hash)==bound_types.begin()+n_bound_types) {
+       bound_types[n_bound_types]=bound_type_hash;
+       ++n_bound_types;
+    }
+    }
+    if (n_bound_instances<8) {
+    const void *bound_instance =  &sf.bounds();
+    if (std::find(bound_instances.begin(),bound_instances.begin()+n_bound_instances, bound_instance)==bound_instances.begin()+n_bound_instances) {
+       bound_instances[n_bound_instances]=bound_instance;
+       ++n_bound_instances;
+    }
+    }
+    
     // veto if it's start surface
     if (options.startObject == &sf) {
       return;
@@ -265,6 +337,12 @@ Acts::Layer::compatibleSurfaces(
   }
   out << std::endl;
   std::cout << out.str() << std::flush;
+  
+  Dbg::g_InstanceCounter->updateNSurfaces(n_surfaces);
+  Dbg::g_InstanceCounter->updateNSurfaceTypes(n_surface_types);
+  Dbg::g_InstanceCounter->updateNBoundTypes(n_bound_types);
+  Dbg::g_InstanceCounter->updateNBoundInstances(n_bound_instances);
+  
   return sIntersections;
 }
 
