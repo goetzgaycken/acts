@@ -24,6 +24,181 @@
 
 namespace Acts::detail {
 
+   namespace {
+   template <typename Object>
+   using cov_type = decltype(std::declval<Object>().cov);
+
+   template <typename  Object, typename = std::void_t<> >
+   struct has_cov : std::false_type{};
+
+   template <typename Object>
+   struct has_cov<Object, std::void_t<cov_type<Object> > > : std::true_type{};
+      
+   template <typename Object>
+   using stepping_type = decltype(std::declval<Object>().stepping);
+
+   template <typename  Object, typename = std::void_t<> >
+   struct has_stepping : std::false_type{};
+
+   template <typename Object>
+   struct has_stepping<Object, std::void_t<stepping_type<Object> > > : std::true_type{};
+
+   std::array<std::pair<Vector3,Vector3>, 4> makeTrajectorySamples(const Acts::Vector3       &position,
+                                                                   const Acts::Vector3       &dir,
+                                                                   const BoundSquareMatrix   &curvi_cov,
+                                                                   Acts::Direction           &navDir)
+   {
+      std::array<std::pair<Acts::Vector3,Acts::Vector3>, 4> trajectory_samples;
+      trajectory_samples[0] = std::make_pair(position,
+                                             dir);
+    auto delta_phi = std::sqrt(curvi_cov(eBoundPhi,eBoundPhi));
+    auto delta_theta = std::sqrt(curvi_cov(eBoundTheta,eBoundTheta));
+    // @TODO switch axis for large eta ...
+    Vector3 dir_u = Vector3::UnitZ().cross(trajectory_samples[0].second).normalized();
+    Vector3 dir_v = trajectory_samples[0].second.cross(dir_u);
+
+    constexpr double multiplier = 4;
+
+    Vector3 delta_u = dir_u * std::sqrt(curvi_cov(eBoundLoc0,eBoundLoc0)) * multiplier;
+    Vector3 delta_v = dir_v * std::sqrt(curvi_cov(eBoundLoc1,eBoundLoc1)) * multiplier;
+
+    Vector3 delta_dirphi;
+    delta_dirphi    << /* -sin(phi) * sin(theta) */ -trajectory_samples[0].second[1] * delta_phi * multiplier,
+                       /*  cos(phi) * sin(theta) */  trajectory_samples[0].second[0] * delta_phi * multiplier,
+                        0;
+    // @TODO use jacobi ?
+    double phi = std::atan2(trajectory_samples[0].second[1], trajectory_samples[0].second[0]);
+    double cos_phi = cos(phi);
+    double sin_phi = sin(phi);
+    double sin_theta = sin( std::acos(trajectory_samples[0].second[2]) );
+    double norm_dir = trajectory_samples[0].second.norm();
+    
+    double sin_theta_alt = std::sqrt( std::max(0., 1 - trajectory_samples[0].second[2] *trajectory_samples[0].second[2]));
+    double inv_sin_theta = 1./sin_theta_alt;
+    double cos_phi_alt = trajectory_samples[0].second[0]*inv_sin_theta;
+    double sin_phi_alt = trajectory_samples[0].second[1]*inv_sin_theta;
+    
+    Vector3 delta_dirtheta;
+    delta_dirtheta <<   /*cos(phi) * cos(theta) */ cos_phi_alt* trajectory_samples[0].second[2] * delta_theta * multiplier,
+                        /*sin(phi) * cos(theta) */ sin_phi_alt* trajectory_samples[0].second[2] * delta_theta * multiplier,
+                        sin_theta_alt * delta_theta * multiplier;
+
+    //    1., 1.    - 1 * dx  1 * dy   45
+    //    1.,-1  ->   0 * dx -2 * dy  -45
+    //    -1,-1  ->  -2 * dx  0 * dy  -45-90
+    //    -1, 1  ->   0 * dx -2 * dy  -45-180
+
+    static constexpr unsigned int N_SAMPLES = trajectory_samples.size()-1;
+    static_assert( N_SAMPLES==3);
+    static constexpr double phase0=M_PI/4.;
+    static constexpr double phase_step = 2*M_PI/N_SAMPLES;
+    static constexpr std::array<std::pair<double,double>,N_SAMPLES >  step_12 {
+       std::make_pair(cos(phase0 + phase_step*0), sin(phase0 + phase_step*0 )),
+       std::make_pair(cos(phase0 + phase_step*1), sin(phase0 + phase_step*1 )),
+       std::make_pair(cos(phase0 + phase_step*2), sin(phase0 + phase_step*2 ))
+    };
+    // choose direction delta_dirphi, delta_dirtheta to maximise || pos + dir - pos0 ||
+    double a1=delta_dirphi.dot(delta_u);
+    double a2=delta_dirphi.dot(delta_v);
+    if (std::abs(a2)>std::abs(a1)) {
+       Vector3 tmp=delta_dirphi;
+       double b1=delta_dirtheta.dot(delta_u);
+       if (b1<0) {
+          delta_dirtheta*=-1.;
+       }
+       
+       delta_dirphi=delta_dirtheta;
+       delta_dirtheta=tmp;
+       if (a2<0) {
+          delta_dirtheta*=-1.;
+       }
+    }
+    else {
+       if (a1<0) {
+          delta_dirphi*=-1.;
+       }
+       double b2=delta_dirtheta.dot(delta_v);
+       if (b2<0) {
+          delta_dirtheta*=-1.;
+       }
+    }
+    
+    for (unsigned int i=0; i<step_12.size(); ++i) { 
+       trajectory_samples[i+1] = std::make_pair( trajectory_samples[0].first
+                                                   + delta_u * step_12[i].first
+                                                   + delta_v * step_12[i].second,
+                                                 navDir * (trajectory_samples[0].second
+                                                                   + delta_dirphi   * step_12[i].first
+                                                                   + delta_dirtheta * step_12[i].second));
+    }
+    return trajectory_samples;
+}
+
+template <typename stepper_t, typename state_t>
+inline Acts::SurfaceMultiIntersection intersectionHelper (const stepper_t &stepper,
+                                                   const state_t &state_stepping,
+                                                   const Surface& surface,
+                                                   std::uint8_t index,
+                                                   Direction navDir,
+                                                   const BoundaryTolerance& boundaryTolerance,
+                                                   ActsScalar surfaceTolerance,
+                                                   double nearLimit,
+                                                   double farLimit,
+                                                   const Logger& logger) {
+   //if constexpr(has_stepping<decltype(state)>::value) {
+   //          state.gwer();
+       if constexpr(has_cov<decltype(state_stepping)>::value) {
+          std::array<std::pair<Vector3,Vector3>, 4>
+             trajectory_samples = makeTrajectorySamples(stepper.position(state_stepping),
+                                                        stepper.direction(state_stepping),
+                                                        state_stepping.cov,
+                                                        navDir);
+          std::stringstream msg;
+          unsigned int n_max_samples = surface.associatedDetectorElement() != nullptr ? trajectory_samples.size() : 1;
+          for (unsigned int sample_i=0; sample_i<n_max_samples; ++sample_i) {
+
+             auto sMultiIntersection = surface.intersect(state_stepping.geoContext, trajectory_samples[sample_i].first,
+                                                         trajectory_samples[sample_i].second,
+                                                         boundaryTolerance,
+                                                         surfaceTolerance);
+             msg << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId() << " [" << surface.geometryId().value() << "] "
+                 << " pos: #" << sample_i << " " << trajectory_samples[sample_i].first[0]
+                 << " " << trajectory_samples[sample_i].first[1] << " " << trajectory_samples[sample_i].first[2]
+                 << (sMultiIntersection.size() > index ? "" : " index-out-of-range")
+                 << " status : " << (sMultiIntersection.size() > index ? static_cast<int>( sMultiIntersection[index].status()) : -1)
+                 << " " << nearLimit << " < " << (sMultiIntersection.size() > index ?  sMultiIntersection[index].pathLength() : std::numeric_limits<double>::max())
+                 << " < " << farLimit 
+                 << std::endl;
+             if (sMultiIntersection.size() > index) {
+
+                if ((sMultiIntersection[index].status() == Intersection3D::Status::onSurface)
+                    || (sMultiIntersection[index].isValid() &&
+                        detail::checkPathLength(sMultiIntersection[index].pathLength(), nearLimit, farLimit,
+                                               logger))
+                    || sample_i+1==n_max_samples) {
+                   std::cout << msg.str() << std::flush;
+                   return sMultiIntersection;
+                }
+             }
+          }
+          std::cout << msg.str() << std::flush;
+          throw std::runtime_error("No multi intersection with enough elements");
+       }
+       else {
+          return surface.intersect(state_stepping.geoContext, stepper.position(state_stepping),
+                                   navDir * stepper.direction(state_stepping), boundaryTolerance,
+                                   surfaceTolerance);
+       }
+       // }
+       // else  {
+       //    return surface.intersect(state.geoContext, stepper.position(state),
+       //                             navDir * stepper.direction(state), boundaryTolerance,
+       //                             surfaceTolerance);
+       // }
+    }
+
+}
+
 /// Update surface status - Single component
 ///
 /// This method intersect the provided surface and update the navigation
@@ -68,10 +243,22 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
         648518483780306176
   };
 
-  auto sIntersection =
-      surface.intersect(state.geoContext, stepper.position(state),
-                        navDir * stepper.direction(state), boundaryTolerance,
-                        surfaceTolerance)[index];
+  const double nearLimit = std::numeric_limits<double>::lowest();
+  const double farLimit = state.stepSize.value(ConstrainedStep::aborter);
+
+  auto sIntersection = intersectionHelper(stepper,
+                                          state,
+                                          surface,
+                                          index,
+                                          navDir,
+                                          boundaryTolerance,
+                                          surfaceTolerance,
+                                          nearLimit,
+                                          farLimit,
+                                          logger)[index];
+      // surface.intersect(state.geoContext, stepper.position(state),
+      //                   navDir * stepper.direction(state), boundaryTolerance,
+      //                   surfaceTolerance)[index];
   if (std::find(geoID.begin(),geoID.end(), surface.geometryId().value())!=geoID.end()) {
      std::size_t geo_id = surface.geometryId().value();
      (void) geo_id;
@@ -79,7 +266,9 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
   }
 
   std::stringstream out;
-  out << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId() << " [" << surface.geometryId().value() << "] ";
+  Vector3 pos = stepper.position(state);
+  out << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId() << " [" << surface.geometryId().value() << "] "
+      << " pos: " << pos[0] << " " << pos[1] << " " << pos[2];
   // The intersection is on surface already
   if (sIntersection.status() == Intersection3D::Status::onSurface) {
     // Release navigation step size
@@ -89,9 +278,6 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
     std::cout << out.str() << std::flush;
     return Intersection3D::Status::onSurface;
   }
-
-  const double nearLimit = std::numeric_limits<double>::lowest();
-  const double farLimit = state.stepSize.value(ConstrainedStep::aborter);
 
   if (sIntersection.isValid() &&
       detail::checkPathLength(sIntersection.pathLength(), nearLimit, farLimit,
@@ -105,7 +291,10 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
   }
 
   ACTS_VERBOSE("Surface is NOT reachable");
-  out << " not reachable" << std::endl;
+  out << " not reachable"
+      <<  (sIntersection.isValid()  ? " intersecting" : " not-intersecting" )
+      << nearLimit << " " << sIntersection.pathLength() <<  " < " << farLimit
+      << std::endl;
   std::cout << out.str() << std::flush;
   return Intersection3D::Status::unreachable;
 }

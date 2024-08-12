@@ -24,6 +24,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include <span>
 
 namespace Acts {
 
@@ -174,6 +175,12 @@ class Layer : public virtual GeometryObject {
       const Vector3& direction,
       const NavigationOptions<Surface>& options) const;
 
+  boost::container::small_vector<SurfaceIntersection, 10> compatibleSurfaces(
+      const GeometryContext& gctx,
+      std::span<std::pair<Vector3,Vector3> > trajectory_samples,
+      const NavigationOptions<Surface>& options) const;
+
+   
   /// Surface seen on approach
   /// for layers without sub structure, this is the surfaceRepresentation
   /// for layers with sub structure, this is the approachSurface
