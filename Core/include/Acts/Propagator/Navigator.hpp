@@ -22,9 +22,121 @@
 #include "Acts/Definitions/Units.hpp"
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 #include <boost/container/small_vector.hpp>
 
+namespace Acts {
+namespace {
+   template <typename Object>
+   using cov_type = decltype(std::declval<Object>().cov);
+
+   template <typename  Object, typename = std::void_t<> >
+   struct has_cov : std::false_type{};
+
+   template <typename Object>
+   struct has_cov<Object, std::void_t<cov_type<Object> > > : std::true_type{};
+
+
+   template <std::size_t N_SAMPLES>
+   constexpr auto makeOffsets() requires(N_SAMPLES>1) -> std::array<std::pair<double,double>,N_SAMPLES-1 > {
+      static constexpr double phase0=M_PI/4.;
+      static constexpr double phase_step = 2*M_PI/(N_SAMPLES-1);
+      static constexpr std::array<std::pair<double,double>,N_SAMPLES-1 >  step_12;
+      for (unsigned int i=0; i<N_SAMPLES-1; ++i) {
+         step_12[i]=std::make_pair(cos(phase0 + phase_step*i), sin(phase0 + phase_step*i ));
+      }
+   }
+
+   template <std::size_t N_SAMPLES>
+   std::array<std::pair<Vector3,Vector3>, N_SAMPLES> makeTrajectorySamples(const Acts::Vector3       &position,
+                                                                           const Acts::Vector3       &dir,
+                                                                           const BoundSquareMatrix   &curvi_cov,
+                                                                           Acts::Direction           &step_direction)
+      requires( N_SAMPLES>0)
+   {
+      std::array<std::pair<Vector3,Vector3>, N_SAMPLES> trajectory_samples;
+      trajectory_samples[0] = std::make_pair(position,
+                                              dir);
+    static constexpr unsigned int N_EXTRA_SAMPLES = trajectory_samples.size()-1;
+    if constexpr(N_EXTRA_SAMPLES>0) {
+    auto delta_phi = std::sqrt(curvi_cov(eBoundPhi,eBoundPhi));
+    auto delta_theta = std::sqrt(curvi_cov(eBoundTheta,eBoundTheta));
+    // @TODO switch axis for large eta ...
+    Vector3 dir_u = Vector3::UnitZ().cross(trajectory_samples[0].second).normalized();
+    Vector3 dir_v = trajectory_samples[0].second.cross(dir_u);
+
+    constexpr double multiplier = 4;
+
+    Vector3 delta_u = dir_u * std::sqrt(curvi_cov(eBoundLoc0,eBoundLoc0)) * multiplier;
+    Vector3 delta_v = dir_v * std::sqrt(curvi_cov(eBoundLoc1,eBoundLoc1)) * multiplier;
+
+    Vector3 delta_dirphi;
+    delta_dirphi    << /* -sin(phi) * sin(theta) */ -trajectory_samples[0].second[1] * delta_phi * multiplier,
+                       /*  cos(phi) * sin(theta) */  trajectory_samples[0].second[0] * delta_phi * multiplier,
+                        0;
+    // @TODO use jacobi ?
+    double phi = std::atan2(trajectory_samples[0].second[1], trajectory_samples[0].second[0]);
+    double cos_phi = cos(phi);
+    double sin_phi = sin(phi);
+    double sin_theta = sin( std::acos(trajectory_samples[0].second[2]) );
+    double norm_dir = trajectory_samples[0].second.norm();
+    
+    double sin_theta_alt = std::sqrt( std::max(0., 1 - trajectory_samples[0].second[2] *trajectory_samples[0].second[2]));
+    double inv_sin_theta = 1./sin_theta_alt;
+    double cos_phi_alt = trajectory_samples[0].second[0]*inv_sin_theta;
+    double sin_phi_alt = trajectory_samples[0].second[1]*inv_sin_theta;
+    
+    Vector3 delta_dirtheta;
+    delta_dirtheta <<   /*cos(phi) * cos(theta) */ cos_phi_alt* trajectory_samples[0].second[2] * delta_theta * multiplier,
+                        /*sin(phi) * cos(theta) */ sin_phi_alt* trajectory_samples[0].second[2] * delta_theta * multiplier,
+                        sin_theta_alt * delta_theta * multiplier;
+
+    //    1., 1.    - 1 * dx  1 * dy   45
+    //    1.,-1  ->   0 * dx -2 * dy  -45
+    //    -1,-1  ->  -2 * dx  0 * dy  -45-90
+    //    -1, 1  ->   0 * dx -2 * dy  -45-180
+
+    static constexpr std::array<std::pair<double,double>,N_EXTRA_SAMPLES >  step_12=makeOffsets<N_EXTRA_SAMPLES>();
+    // choose direction delta_dirphi, delta_dirtheta to maximise || pos + dir - pos0 ||
+    double a1=delta_dirphi.dot(delta_u);
+    double a2=delta_dirphi.dot(delta_v);
+    if (std::abs(a2)>std::abs(a1)) {
+       Vector3 tmp=delta_dirphi;
+       double b1=delta_dirtheta.dot(delta_u);
+       if (b1<0) {
+          delta_dirtheta*=-1.;
+       }
+       
+       delta_dirphi=delta_dirtheta;
+       delta_dirtheta=tmp;
+       if (a2<0) {
+          delta_dirtheta*=-1.;
+       }
+    }
+    else {
+       if (a1<0) {
+          delta_dirphi*=-1.;
+       }
+       double b2=delta_dirtheta.dot(delta_v);
+       if (b2<0) {
+          delta_dirtheta*=-1.;
+       }
+    }
+    
+    for (unsigned int i=0; i<step_12.size(); ++i) { 
+       trajectory_samples[i+1] = std::make_pair( trajectory_samples[0].first
+                                                   + delta_u * step_12[i].first
+                                                   + delta_v * step_12[i].second,
+                                                 step_direction * (trajectory_samples[0].second
+                                                                   + delta_dirphi   * step_12[i].first
+                                                                   + delta_dirtheta * step_12[i].second));
+    }
+    }
+    return trajectory_samples;
+}
+}
+}
 namespace Acts {
 
 /// @brief struct for the Navigation options that are forwarded to
@@ -647,6 +759,7 @@ class Navigator {
           break;
         }
       }
+
       auto surfaceStatus = stepper.updateSurfaceStatus(
           state.stepping, *surface, intersection.index(),
           state.options.direction, boundaryTolerance,
@@ -1065,8 +1178,8 @@ class Navigator {
     navOpts.resolvePassive = m_cfg.resolvePassive;
     navOpts.startObject = state.navigation.currentSurface;
     navOpts.endObject = state.navigation.targetSurface;
-    double tol1mm= 1.*Acts::UnitConstants::mm ;
-    navOpts.boundaryTolerance = BoundaryTolerance::AbsoluteCartesian{tol1mm,tol1mm};
+    // double tol1mm= 2.*Acts::UnitConstants::mm ;
+    // navOpts.boundaryTolerance = BoundaryTolerance::AbsoluteCartesian{tol1mm,tol1mm};
 
     std::vector<GeometryIdentifier> externalSurfaces;
     if (!state.navigation.options.externalSurfaces.empty()) {
@@ -1084,10 +1197,65 @@ class Navigator {
     navOpts.farLimit =
         stepper.getStepSize(state.stepping, ConstrainedStep::aborter);
 
+    if constexpr(has_cov<decltype(state.stepping)>::value) {
+       constexpr std::size_t N_SAMPLES = 4;
+       std::array<std::pair<Vector3,Vector3>, N_SAMPLES>
+          trajectory_samples = makeTrajectorySamples<N_SAMPLES>(stepper.position(state.stepping),
+                                                                stepper.direction(state.stepping),
+                                                                state.stepping.cov,
+                                                                state.options.direction);
+    // std::array< boost::container::small_vector<SurfaceIntersection, 10>, 4> nav_surfaces;
+    // std::unordered_map< const Surface *, std::pair< unsigned int, std::array<unsigned char, 4> > > intersecting_surfaces;
+    // intersecting_surfaces.reserve(10);
+    // for (unsigned int i=0; i<trajectory_samples.size(); ++i) {
+    //    nav_surfaces[i] = currentLayer->compatibleSurfaces(
+    //           state.geoContext, trajectory_samples[i].first,
+    //           state.options.direction * trajectory_samples[i].second, navOpts);
+    //    for (const auto &intersection : nav_surfaces[i]) {
+    //       auto iter = 
+    //          intersecting_surfaces.find( intersection.object());
+    //       if (iter == intersecting_surfaces.end()) {
+    //          auto ret =
+    //             intersecting_surfaces.insert( std::make_pair(intersection.object(), std::make_pair(0u,std::array<unsigned char, 4>())));
+    //          iter = ret.first;
+    //       }
+    //       iter->second.second.at(iter->second.first++) = static_cast<unsigned char>(i);
+    //    }
+    // }
+
+    // std::stringstream msg;
+    // for (const auto &elm : intersecting_surfaces) {
+    //    msg << "DEBUG compatibleSurfaces intersecting ";
+    //    bool is_principle = elm.second.first > 0 && elm.second.second.at(0) == 0;
+    //    msg << ( is_principle ? " principle " : " ALTERNATE ");
+    //    msg << elm.first->geometryId() << " [" << elm.first->geometryId().value() << "] #" << elm.second.first << "  : ";
+    //    for (unsigned int sample_i=0; sample_i < elm.second.first; ++sample_i) {
+    //       for (const auto &an_intersection : nav_surfaces.at( elm.second.second.at(sample_i) ) ) {
+    //          if (an_intersection.object() == elm.first) {
+    //             msg <<  an_intersection.pathLength() << " [" << static_cast<unsigned int>(an_intersection.status())
+    //                 << ";#"  << elm.second.second.at(sample_i)  "]";
+    //             break;
+    //          }
+    //       }
+    //    }
+    //    msg  << std::endl;
+    // }
+    // std::cout << msg.str() << std::flush;
+    
+    state.navigation.navSurfaces = currentLayer->compatibleSurfaces(state.geoContext,
+                                                                    std::span(trajectory_samples.begin(),
+                                                                              trajectory_samples.end()),
+                                                                    navOpts);
+
+    // state.navigation.navSurfaces = std::move( nav_surfaces[0] );
+    }
+    else {
     // get the surfaces
-    state.navigation.navSurfaces = currentLayer->compatibleSurfaces(
-        state.geoContext, stepper.position(state.stepping),
-        state.options.direction * stepper.direction(state.stepping), navOpts);
+       state.navigation.navSurfaces = currentLayer->compatibleSurfaces(
+           state.geoContext, stepper.position(state.stepping),
+           state.options.direction * stepper.direction(state.stepping), navOpts);
+    }
+    
     std::sort(state.navigation.navSurfaces.begin(),
               state.navigation.navSurfaces.end(),
               SurfaceIntersection::pathLengthOrder);
