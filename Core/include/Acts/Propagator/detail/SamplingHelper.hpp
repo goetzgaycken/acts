@@ -19,8 +19,13 @@
 
 #include <sstream>
 #include <iostream>
+#include <array>
 
 #include <limits>
+
+#include <variant>
+#include <iostream>
+#include <type_traits>
 
 
 namespace Acts::SamplingHelper {
@@ -41,16 +46,41 @@ namespace Acts::SamplingHelper {
 
    template <typename Object>
    struct has_stepping<Object, std::void_t<stepping_type<Object> > > : std::true_type{};
+   
+   template <typename Object>
+   using options_type = decltype(std::declval<Object>().options);
+
+   template <typename  Object, typename = std::void_t<> >
+   struct has_options : std::false_type{};
+
+   template <typename Object>
+   struct has_options<Object, std::void_t<options_type<Object> > > : std::true_type{};
+
+   
+   template <typename stepper_t
+   unsigned int getNSamplers(const stepper_t &stepper) {
+      if constexpr(has_options<stepper_t>::value) {
+         return stepper.options.n_samples;
+      }
+      else {
+         return 0u;
+      }
+   }
+
+   
 
    template <std::size_t N_SAMPLES>
    inline
-   constexpr auto makeOffsets() requires(N_SAMPLES>1) -> std::array<std::pair<double,double>,N_SAMPLES-1 > {
-      static constexpr double phase0=M_PI/4.;
-      static constexpr double phase_step = 2*M_PI/(N_SAMPLES-1);
-      static constexpr std::array<std::pair<double,double>,N_SAMPLES-1 >  step_12;
+   constexpr auto makeOffsets()  -> std::array<std::pair<double,double>,N_SAMPLES-1 >
+      requires(N_SAMPLES>1)
+   {
+      constexpr double phase0=M_PI/4.;
+      constexpr double phase_step = 2*M_PI/(N_SAMPLES-1);
+      std::array<std::pair<double,double>,N_SAMPLES-1 >  step_12;
       for (unsigned int i=0; i<N_SAMPLES-1; ++i) {
          step_12[i]=std::make_pair(cos(phase0 + phase_step*i), sin(phase0 + phase_step*i ));
       }
+      return step_12;
    }
 
    template <std::size_t N_SAMPLES>
@@ -63,9 +93,8 @@ namespace Acts::SamplingHelper {
    {
       std::array<std::pair<Vector3,Vector3>, N_SAMPLES> trajectory_samples;
       trajectory_samples[0] = std::make_pair(position,
-                                             dir);
-      static constexpr unsigned int N_EXTRA_SAMPLES = trajectory_samples.size()-1;
-      if constexpr(N_EXTRA_SAMPLES>0) {
+                                             step_direction * dir);
+      if constexpr(N_SAMPLES>1) {
          auto delta_phi = std::sqrt(curvi_cov(eBoundPhi,eBoundPhi));
          auto delta_theta = std::sqrt(curvi_cov(eBoundTheta,eBoundTheta));
          // @TODO switch axis for large eta ...
@@ -103,7 +132,7 @@ namespace Acts::SamplingHelper {
          //    -1,-1  ->  -2 * dx  0 * dy  -45-90
          //    -1, 1  ->   0 * dx -2 * dy  -45-180
 
-         static constexpr std::array<std::pair<double,double>,N_EXTRA_SAMPLES >  step_12=makeOffsets<N_EXTRA_SAMPLES>();
+         static constexpr std::array<std::pair<double,double>,N_SAMPLES-1 >  step_12=makeOffsets<N_SAMPLES>();
          // choose direction delta_dirphi, delta_dirtheta to maximise || pos + dir - pos0 ||
          double a1=delta_dirphi.dot(delta_u);
          double a2=delta_dirphi.dot(delta_v);
@@ -140,5 +169,26 @@ namespace Acts::SamplingHelper {
          }
       }
       return trajectory_samples;
+   }
+
+   template <unsigned int N_SAMPLES>
+   struct NSamples {
+      static constexpr unsigned int n_samples = N_SAMPLES;
+   };
+
+   using AllowedSamples = std::variant<NSamples<1>, NSamples<4>, NSamples<8> > ;
+
+   template <std::size_t N = std::variant_size_v<AllowedSamples> > 
+   AllowedSamples makeSampleValue(unsigned int value) {
+      if constexpr(N == 0) {
+         throw std::runtime_error("Not allowed");
+         return decltype(std::get<0>(AllowedSamples{})){};
+      }
+      else {
+         if (value == std::remove_reference<decltype(std::get<N-1>(AllowedSamples{}))>::type ::n_samples) {
+            return decltype(std::get<N-1>(AllowedSamples{})){};
+         }
+         return makeSampleValue<N-1>(value);
+      }
    }
 }

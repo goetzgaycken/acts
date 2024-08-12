@@ -885,7 +885,13 @@ class CombinatorialKalmanFilter {
           auto nonSourcelinkState =
               result.trackStates->getTrackState(currentTip);
           currentBranch.tipIndex() = currentTip;
-          currentBranch.nHoles()++;
+
+          if (surface->isOnSurface(state.geoContext, stepper.position(state.stepping), stepper.direction(state.stepping))) {
+             currentBranch.nHoles()++;
+          }
+          else {
+             ACTS_INFO("Not on surface, not counting as a hole.");
+          }
 
           BranchStopperResult branchStopperResult =
               m_extensions.branchStopper(currentBranch, nonSourcelinkState);
@@ -1021,7 +1027,12 @@ class CombinatorialKalmanFilter {
               result.trackStates->getTrackState(currentTip);
           currentBranch.tipIndex() = currentTip;
           if (isSensitive) {
-            currentBranch.nHoles()++;
+             if (surface->isOnSurface(state.geoContext, stepper.position(state.stepping), stepper.direction(state.stepping))) {
+                currentBranch.nHoles()++;
+             }
+             else {
+                ACTS_INFO("Not on (empty) surface, not counting as a hole.");
+             }
           }
 
           BranchStopperResult branchStopperResult =

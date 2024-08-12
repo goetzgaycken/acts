@@ -19,6 +19,7 @@
 
 #include <sstream>
 #include <iostream>
+#include <span>
 
 #include <limits>
 
@@ -27,6 +28,52 @@
 namespace Acts::detail {
 
 namespace {
+
+  Acts::SurfaceMultiIntersection intersect(const GeometryContext &gctx,
+                                           const Surface& surface,
+                                           std::uint8_t index,
+                                           std::span<std::pair<Vector3,Vector3> > &trajectory_samples,
+                                           const BoundaryTolerance& boundaryTolerance,
+                                           ActsScalar surfaceTolerance,
+                                           double nearLimit,
+                                           double farLimit,
+                                           const Logger& logger) {
+
+      std::stringstream msg;
+      unsigned int n_max_samples = surface.associatedDetectorElement() != nullptr ? trajectory_samples.size() : 1;
+      for (unsigned int sample_i=0; sample_i<n_max_samples; ++sample_i) {
+
+         auto sMultiIntersection = surface.intersect(gctx, trajectory_samples[sample_i].first,
+                                                     trajectory_samples[sample_i].second,
+                                                     boundaryTolerance,
+                                                     surfaceTolerance);
+         msg << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId() << " [" << surface.geometryId().value() << "] "
+             << " pos: #" << sample_i << " " << trajectory_samples[sample_i].first[0]
+             << " " << trajectory_samples[sample_i].first[1] << " " << trajectory_samples[sample_i].first[2]
+             << (sMultiIntersection.size() > index ? "" : " index-out-of-range")
+             << " status : " << (sMultiIntersection.size() > index ? static_cast<int>( sMultiIntersection[index].status()) : -1)
+             << " " << nearLimit << " < " << (sMultiIntersection.size() > index
+                                              ?  sMultiIntersection[index].pathLength()
+                                              : std::numeric_limits<double>::max())
+             << " < " << farLimit 
+             << std::endl;
+         if (sMultiIntersection.size() > index) {
+
+            if ((sMultiIntersection[index].status() == Intersection3D::Status::onSurface)
+                || (sMultiIntersection[index].isValid() &&
+                    detail::checkPathLength(sMultiIntersection[index].pathLength(), nearLimit, farLimit,
+                                            logger))
+                || sample_i+1==n_max_samples) {
+               std::cout << msg.str() << std::flush;
+               return sMultiIntersection;
+            }
+         }
+      }
+      std::cout << msg.str() << std::flush;
+      throw std::runtime_error("No multi intersection with enough elements");
+      
+   }
+
 
 template <typename stepper_t, typename state_t>
 inline Acts::SurfaceMultiIntersection intersectionHelper (const stepper_t &stepper,
@@ -39,44 +86,40 @@ inline Acts::SurfaceMultiIntersection intersectionHelper (const stepper_t &stepp
                                                    double nearLimit,
                                                    double farLimit,
                                                    const Logger& logger) {
+   
    //if constexpr(has_stepping<decltype(state)>::value) {
    //          state.gwer();
-   if constexpr(Acts::SamplingHelper::has_cov<decltype(state_stepping)>::value) {
-          std::array<std::pair<Vector3,Vector3>, 4>
-             trajectory_samples = Acts::SamplingHelper::makeTrajectorySamples(stepper.position(state_stepping),
-                                                                              stepper.direction(state_stepping),
-                                                                              state_stepping.cov,
-                                                                              navDir);
-          std::stringstream msg;
-          unsigned int n_max_samples = surface.associatedDetectorElement() != nullptr ? trajectory_samples.size() : 1;
-          for (unsigned int sample_i=0; sample_i<n_max_samples; ++sample_i) {
+   if constexpr(Acts::SamplingHelper::has_cov<decltype(state_stepping)>::value && getNSamplers(stepper)) {
 
-             auto sMultiIntersection = surface.intersect(state_stepping.geoContext, trajectory_samples[sample_i].first,
-                                                         trajectory_samples[sample_i].second,
-                                                         boundaryTolerance,
-                                                         surfaceTolerance);
-             msg << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId() << " [" << surface.geometryId().value() << "] "
-                 << " pos: #" << sample_i << " " << trajectory_samples[sample_i].first[0]
-                 << " " << trajectory_samples[sample_i].first[1] << " " << trajectory_samples[sample_i].first[2]
-                 << (sMultiIntersection.size() > index ? "" : " index-out-of-range")
-                 << " status : " << (sMultiIntersection.size() > index ? static_cast<int>( sMultiIntersection[index].status()) : -1)
-                 << " " << nearLimit << " < " << (sMultiIntersection.size() > index ?  sMultiIntersection[index].pathLength() : std::numeric_limits<double>::max())
-                 << " < " << farLimit 
-                 << std::endl;
-             if (sMultiIntersection.size() > index) {
 
-                if ((sMultiIntersection[index].status() == Intersection3D::Status::onSurface)
-                    || (sMultiIntersection[index].isValid() &&
-                        detail::checkPathLength(sMultiIntersection[index].pathLength(), nearLimit, farLimit,
-                                               logger))
-                    || sample_i+1==n_max_samples) {
-                   std::cout << msg.str() << std::flush;
-                   return sMultiIntersection;
-                }
-             }
-          }
-          std::cout << msg.str() << std::flush;
-          throw std::runtime_error("No multi intersection with enough elements");
+      return std::visit( [&stepper,
+                          &state_stepping,
+                          navDir,
+                          &surface,
+                          index,
+                          &boundaryTolerance,
+                          &surfaceTolerance,
+                          &nearLimit,
+                          &farLimit,
+                          &logger
+                          ](const auto &elm) {
+         constexpr unsigned int N_SAMPLES = elm.getSamples();
+            std::array<std::pair<Vector3,Vector3>, N_SAMPLES>
+               trajectory_samples = Acts::SamplingHelper::makeTrajectorySamples<N_SAMPLES>(stepper.position(state_stepping),
+                                                                                           stepper.direction(state_stepping),
+                                                                                           state_stepping.cov,
+                                                                                           navDir);
+            return intersect(state_stepping.geoContext,
+                             surface,
+                             index,
+                             std::span(trajectory_samples.begin(),trajectory_samples.end()),
+                             boundaryTolerance,
+                             surfaceTolerance,
+                             nearLimit,
+                             farLimit,
+                             logger);
+
+      }, makeSampleValue(stepper.options.n_samples) );
    }
    else {
       return surface.intersect(state_stepping.geoContext, stepper.position(state_stepping),

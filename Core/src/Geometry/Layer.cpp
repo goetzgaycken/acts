@@ -181,7 +181,7 @@ Acts::Layer::compatibleSurfaces(
 
   std::stringstream out;
   out << "DEBUG compatibleSurfaces pos " << position[0] << " " << position[1] << " " << position[2] << " "
-      << ", " << direction[0] << " " << direction[1] << " " << direction[2] << " "
+      << ", " << direction[0] << " " << direction[1] << " " << direction[2] << " ";
   
   // fast exit - there is nothing to
   if (!m_surfaceArray || !m_approachDescriptor) {

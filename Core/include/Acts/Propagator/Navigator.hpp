@@ -1088,10 +1088,10 @@ class Navigator {
     navOpts.farLimit =
         stepper.getStepSize(state.stepping, ConstrainedStep::aborter);
 
-    if constexpr(has_cov<decltype(state.stepping)>::value) {
+    if constexpr(Acts::SamplingHelper::has_cov<decltype(state.stepping)>::value) {
        constexpr std::size_t N_SAMPLES = 4;
        std::array<std::pair<Vector3,Vector3>, N_SAMPLES>
-          trajectory_samples = ActS::SamplingHelper::makeTrajectorySamples<N_SAMPLES>(stepper.position(state.stepping),
+          trajectory_samples = Acts::SamplingHelper::makeTrajectorySamples<N_SAMPLES>(stepper.position(state.stepping),
                                                                                       stepper.direction(state.stepping),
                                                                                       state.stepping.cov,
                                                                                       state.options.direction);
