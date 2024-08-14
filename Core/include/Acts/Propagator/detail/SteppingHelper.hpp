@@ -16,6 +16,7 @@
 #include "Acts/Surfaces/Surface.hpp"
 #include "Acts/Utilities/Intersection.hpp"
 #include "Acts/Utilities/Logger.hpp"
+#include "Acts/Geometry/GeoIdRegistry.hpp"
 
 #include <sstream>
 #include <iostream>
@@ -41,13 +42,18 @@ namespace {
 
       std::stringstream msg;
       unsigned int n_max_samples = surface.associatedDetectorElement() != nullptr ? trajectory_samples.size() : 1;
+
+      Dbg::GeoIdHelper  geo_ids;
+      bool is_known = geo_ids.isKnown(surface.geometryId().value());
+      
       for (unsigned int sample_i=0; sample_i<n_max_samples; ++sample_i) {
 
          auto sMultiIntersection = surface.intersect(gctx, trajectory_samples[sample_i].first,
                                                      trajectory_samples[sample_i].second,
                                                      boundaryTolerance,
                                                      surfaceTolerance);
-         msg << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId() << " [" << surface.geometryId().value() << "] "
+         msg << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId()
+             << " [" << std::hex << surface.geometryId().value() << std::dec << (is_known ? "*" : "") << "] "
              << " pos: #" << sample_i << " " << trajectory_samples[sample_i].first[0]
              << " " << trajectory_samples[sample_i].first[1] << " " << trajectory_samples[sample_i].first[2]
              << (sMultiIntersection.size() > index ? "" : " index-out-of-range")
@@ -89,8 +95,8 @@ inline Acts::SurfaceMultiIntersection intersectionHelper (const stepper_t &stepp
    
    //if constexpr(has_stepping<decltype(state)>::value) {
    //          state.gwer();
-   if constexpr(Acts::SamplingHelper::has_cov<decltype(state_stepping)>::value && getNSamplers(stepper)) {
-
+   if constexpr(Acts::SamplingHelper::has_cov<decltype(state_stepping)>::value && Acts::SamplingHelper::has_options<stepper_t>::value) {
+       if ( Acts::SamplingHelper::getNSamplers(state_stepping)>0) {
 
       return std::visit( [&stepper,
                           &state_stepping,
@@ -119,7 +125,13 @@ inline Acts::SurfaceMultiIntersection intersectionHelper (const stepper_t &stepp
                              farLimit,
                              logger);
 
-      }, makeSampleValue(stepper.options.n_samples) );
+      }, Acts::SamplingHelper::makeSampleValue(Acts::SamplingHelper::getNSamplers(state_stepping)) );
+      }
+      else {
+         return surface.intersect(state_stepping.geoContext, stepper.position(state_stepping),
+                                  navDir * stepper.direction(state_stepping), boundaryTolerance,
+                                  surfaceTolerance);
+      }
    }
    else {
       return surface.intersect(state_stepping.geoContext, stepper.position(state_stepping),
@@ -154,31 +166,8 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
     const Logger& logger) {
   ACTS_VERBOSE("Update single surface status for surface: "
                << surface.geometryId() << " index " << static_cast<int>(index));
-  static const std::array<std::size_t,23> geoID = {
-     1585267756029461248,
-        1585267756029461504,
-        1585267618590573312,
-        1585267618590573568,
-        1585267481151619840,
-        1585267481151620096,
-        1585267343712715520,
-        1585267343712715776,
-        1585267206273582336,
-        1585267206273582592,
-        576464325716219904,
-        576464188277266432,
-        576464050838308352,
-        576463913399354880,
-        576464325716220160,
-        576464188277266688,
-        576464050838308608,
-        576463913399355136,
-        936750646638415872,
-        1008807553481577984,
-        1080865010080549632,
-        1080865010080549888,
-        648518483780306176
-  };
+
+  Dbg::GeoIdHelper  geo_ids;
 
   const double nearLimit = std::numeric_limits<double>::lowest();
   const double farLimit = state.stepSize.value(ConstrainedStep::aborter);
@@ -196,15 +185,18 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
       // surface.intersect(state.geoContext, stepper.position(state),
       //                   navDir * stepper.direction(state), boundaryTolerance,
       //                   surfaceTolerance)[index];
-  if (std::find(geoID.begin(),geoID.end(), surface.geometryId().value())!=geoID.end()) {
+
+  bool is_known = geo_ids.isKnown(surface.geometryId().value());
+  if (is_known) {
      std::size_t geo_id = surface.geometryId().value();
      (void) geo_id;
-     std::cout <<"DEBUG SteppingHelper " << __LINE__ << " geo " << surface.geometryId() << " [" << surface.geometryId().value() << "]" << std::endl;
+     std::cout <<"DEBUG SteppingHelper " << __LINE__ << " geo " << surface.geometryId() << " [" << std::hex << surface.geometryId().value() << std::dec << "*]" << std::endl;
   }
 
   std::stringstream out;
   Vector3 pos = stepper.position(state);
-  out << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId() << " [" << surface.geometryId().value() << "] "
+  out << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId() << " ["
+      << std::hex << surface.geometryId().value() << std::dec << (is_known ? "*" : "") << "] "
       << " pos: " << pos[0] << " " << pos[1] << " " << pos[2];
   // The intersection is on surface already
   if (sIntersection.status() == Intersection3D::Status::onSurface) {

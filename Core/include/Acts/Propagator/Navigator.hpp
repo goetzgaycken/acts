@@ -11,6 +11,7 @@
 #include "Acts/Definitions/Units.hpp"
 #include "Acts/Geometry/GeometryIdentifier.hpp"
 #include "Acts/Geometry/Layer.hpp"
+#include "Acts/Geometry/GeoIdRegistry.hpp"
 #include "Acts/Geometry/TrackingGeometry.hpp"
 #include "Acts/Geometry/TrackingVolume.hpp"
 #include "Acts/Propagator/ConstrainedStep.hpp"
@@ -662,37 +663,17 @@ class Navigator {
         return true;
       }
       ++state.navigation.navSurfaceIndex;
-      static const std::array<std::size_t,23> geoID = {
-         1585267756029461248,
-         1585267756029461504,
-         1585267618590573312,
-         1585267618590573568,
-         1585267481151619840,
-         1585267481151620096,
-         1585267343712715520,
-         1585267343712715776,
-         1585267206273582336,
-         1585267206273582592,
-         576464325716219904,
-         576464188277266432,
-         576464050838308352,
-         576463913399354880,
-         576464325716220160,
-         576464188277266688,
-         576464050838308608,
-         576463913399355136,
-         936750646638415872,
-         1008807553481577984,
-         1080865010080549632,
-         1080865010080549888,
-         648518483780306176
-      };
+      Dbg::GeoIdHelper  geo_ids;
 
       if (state.navigation.navSurfaceIndex != state.navigation.navSurfaces.size() && state.navigation.navSurface().object()) {
-         if (std::find(geoID.begin(),geoID.end(), state.navigation.navSurface().object()->geometryId().value())!=geoID.end()) {
+         if (geo_ids.isKnown(state.navigation.navSurface().object()->geometryId().value())) {
             std::size_t geo_id = state.navigation.navSurface().object()->geometryId().value();
             (void) geo_id;
-            std::cout <<"DEBUG Navigator " << __LINE__ << " geo " << state.navigation.navSurface().object()->geometryId() << " [" << state.navigation.navSurface().object()->geometryId().value() << "]" << std::endl;
+            std::cout <<"DEBUG Navigator " << __LINE__ << " geo "
+                      << state.navigation.navSurface().object()->geometryId()
+                      << " [" << std::hex << state.navigation.navSurface().object()->geometryId().value()
+                      << "*"
+                      << std::dec << "]" << std::endl;
          }
       }
       
@@ -1088,13 +1069,34 @@ class Navigator {
     navOpts.farLimit =
         stepper.getStepSize(state.stepping, ConstrainedStep::aborter);
 
-    if constexpr(Acts::SamplingHelper::has_cov<decltype(state.stepping)>::value) {
-       constexpr std::size_t N_SAMPLES = 4;
-       std::array<std::pair<Vector3,Vector3>, N_SAMPLES>
-          trajectory_samples = Acts::SamplingHelper::makeTrajectorySamples<N_SAMPLES>(stepper.position(state.stepping),
-                                                                                      stepper.direction(state.stepping),
-                                                                                      state.stepping.cov,
-                                                                                      state.options.direction);
+    if constexpr(Acts::SamplingHelper::has_cov<decltype(state.stepping)>::value)  {
+       if ( Acts::SamplingHelper::getNSamplers(state.stepping)>0) {
+
+      std::visit( [&stepper,
+                          &state,
+                          currentLayer,
+                          &navOpts
+                          ](const auto &elm) {
+         constexpr unsigned int N_SAMPLES = elm.getSamples();
+         std::array<std::pair<Vector3,Vector3>, N_SAMPLES>
+               trajectory_samples = Acts::SamplingHelper::makeTrajectorySamples<N_SAMPLES>(stepper.position(state.stepping),
+                                                                                           stepper.direction(state.stepping),
+                                                                                           state.stepping.cov,
+                                                                                           state.options.direction);
+         state.navigation.navSurfaces = currentLayer->compatibleSurfaces(state.geoContext,
+                                                                         std::span(trajectory_samples.begin(),
+                                                                                   trajectory_samples.end()),
+                                                                         navOpts);
+
+      }, Acts::SamplingHelper::makeSampleValue(Acts::SamplingHelper::getNSamplers(state.stepping)));
+       }
+       else {
+          state.navigation.navSurfaces = currentLayer->compatibleSurfaces(
+              state.geoContext, stepper.position(state.stepping),
+              state.options.direction * stepper.direction(state.stepping), navOpts);
+       }
+    
+       
     // std::array< boost::container::small_vector<SurfaceIntersection, 10>, 4> nav_surfaces;
     // std::unordered_map< const Surface *, std::pair< unsigned int, std::array<unsigned char, 4> > > intersecting_surfaces;
     // intersecting_surfaces.reserve(10);
@@ -1133,10 +1135,10 @@ class Navigator {
     // }
     // std::cout << msg.str() << std::flush;
     
-    state.navigation.navSurfaces = currentLayer->compatibleSurfaces(state.geoContext,
-                                                                    std::span(trajectory_samples.begin(),
-                                                                              trajectory_samples.end()),
-                                                                    navOpts);
+    // state.navigation.navSurfaces = currentLayer->compatibleSurfaces(state.geoContext,
+    //                                                                 std::span(trajectory_samples.begin(),
+    //                                                                           trajectory_samples.end()),
+    //                                                                 navOpts);
 
     // state.navigation.navSurfaces = std::move( nav_surfaces[0] );
     }
@@ -1166,37 +1168,15 @@ class Navigator {
     if (!state.navigation.navSurfaces.empty()) {
       // set the index
       state.navigation.navSurfaceIndex = 0;
-      static const std::array<std::size_t,23> geoID = {
-         1585267756029461248,
-         1585267756029461504,
-         1585267618590573312,
-         1585267618590573568,
-         1585267481151619840,
-         1585267481151620096,
-         1585267343712715520,
-         1585267343712715776,
-         1585267206273582336,
-         1585267206273582592,
-         576464325716219904,
-         576464188277266432,
-         576464050838308352,
-         576463913399354880,
-         576464325716220160,
-         576464188277266688,
-         576464050838308608,
-         576463913399355136,
-         936750646638415872,
-         1008807553481577984,
-         1080865010080549632,
-         1080865010080549888,
-         648518483780306176
-      };
+      Dbg::GeoIdHelper  geo_ids;
 
       if (state.navigation.navSurfaceIndex != state.navigation.navSurfaces.size() && state.navigation.navSurface().object()) {
-         if (std::find(geoID.begin(),geoID.end(), state.navigation.navSurface().object()->geometryId().value())!=geoID.end()) {
+         if (geo_ids.isKnown(state.navigation.navSurface().object()->geometryId().value())) {
             std::size_t geo_id = state.navigation.navSurface().object()->geometryId().value();
             (void) geo_id;
-            std::cout <<"DEBUG Navigator " << __LINE__ << " geo " << state.navigation.navSurface().object()->geometryId() << " [" << state.navigation.navSurface().object()->geometryId().value() << "]" << std::endl;
+            std::cout <<"DEBUG Navigator " << __LINE__ << " geo "
+                      << state.navigation.navSurface().object()->geometryId()
+                      << " [" << std::hex << state.navigation.navSurface().object()->geometryId().value() << std::dec << "*]" << std::endl;
          }
       }
       

@@ -7,6 +7,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "Acts/Geometry/Layer.hpp"
+#include "Acts/Geometry/GeoIdRegistry.hpp"
 
 #include "Acts/Definitions/Direction.hpp"
 #include "Acts/Definitions/Tolerance.hpp"
@@ -252,6 +253,8 @@ Acts::Layer::compatibleSurfaces(
   out << std::endl;
   // lemma 1 : check and fill the surface
   unsigned int n_surfaces{};
+  unsigned int n_surfaces_total{};
+  unsigned int n_intersections{};
   unsigned int n_surface_types{};
   unsigned int n_bound_types{};
   unsigned int n_bound_instances{};
@@ -261,6 +264,8 @@ Acts::Layer::compatibleSurfaces(
   std::array<const void *,16> bound_instances;
   std::array<std::vector<double>,16> bound_values;
   std::size_t a_geo_id{};
+  Dbg::GeoIdHelper  geo_ids;
+  std::vector< std::pair< std::size_t, unsigned int > > missed_geoids;
   
   // [&sIntersections, &options, &parameters
   auto processSurface = [&](const Surface& sf, bool sensitive = false) {
@@ -307,7 +312,7 @@ Acts::Layer::compatibleSurfaces(
        }
        if (!have) {
           bound_values[n_bound_values]=std::move(this_bound_values);
-          if (Dbg::g_counter < 6000) {
+          if (Dbg::g_counter < 6000*4) {
              std::stringstream msg;
              msg << "DEBUG bound_values call " << Dbg::g_callCounter << " n=" << bound_values[n_bound_values].size() << ":";
              for (const double &elm : bound_values[n_bound_values]) {
@@ -337,19 +342,30 @@ Acts::Layer::compatibleSurfaces(
     }
     // the surface intersection
     //try {
+    ++n_intersections;
     SurfaceIntersection sfi =
         sf.intersect(gctx, position, direction, boundaryTolerance).closest();
-    out << "DEBUG processSurface pos " << position[0] << " " << position[1] << " " << position[2] << " intersect with "
-        <<  sf.geometryId().value() << " " << ( sf.associatedDetectorElement() != nullptr ? "D" : "")
-       << ( sf.surfaceMaterial() != nullptr ? "M" : "")
-        << ( sfi.isValid() ? " intersecting " : " not-intersecting")
-        << (detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) ? "" : " pathlegnth-check-failed")
-        << (isUnique(sfi) ? "" : " not unique") << std::endl;
+    // out << "DEBUG processSurface pos " << position[0] << " " << position[1] << " " << position[2] << " intersect with "
+    //     <<  std::hex << sf.geometryId().value() << std::dec
+    //     << ( geo_ids.isKnown(sf.geometryId().value()) ? "*" : "")
+    //     << " " << ( sf.associatedDetectorElement() != nullptr ? "D" : "")
+    //    << ( sf.surfaceMaterial() != nullptr ? "M" : "")
+    //     << ( sfi.isValid() ? " intersecting " : " not-intersecting")
+    //     << (detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) ? "" : " pathlegnth-check-failed")
+    //     << (isUnique(sfi) ? "" : " not unique") << std::endl;
     
     if (sfi.isValid() &&
         detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) &&
         isUnique(sfi)) {
       sIntersections.push_back(sfi);
+    }
+    else {
+       if (geo_ids.isKnown(sf.geometryId().value())) {
+          missed_geoids.push_back( std::make_pair(sf.geometryId().value(),
+                                                  ((sfi.isValid() == true ) << 0)
+                                                  | ( (detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit)==true) << 1)
+                                                  | ( isUnique(sfi) << 2) ) );
+       }
     }
     // }
     // catch (...) {
@@ -384,7 +400,7 @@ Acts::Layer::compatibleSurfaces(
     Dbg::g_InstanceCounter[Dbg::kApproach]->updateNBoundTypes(n_bound_types);
     Dbg::g_InstanceCounter[Dbg::kApproach]->updateNBoundInstances(n_bound_instances);
     Dbg::g_InstanceCounter[Dbg::kApproach]->updateNBoundValues(n_bound_values);
-
+    n_surfaces_total += n_surfaces;
     a_geo_id=0u;
     n_surfaces=0;
     n_surface_types=0;
@@ -407,6 +423,7 @@ Acts::Layer::compatibleSurfaces(
     for (auto& sSurface : sensitiveSurfaces) {
       processSurface(*sSurface, true);
     }
+    n_surfaces_total += n_surfaces;
     Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNSurfaces(n_surfaces);
     Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNSurfaceTypes(n_surface_types);
     Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNBoundTypes(n_bound_types);
@@ -431,6 +448,7 @@ Acts::Layer::compatibleSurfaces(
   // the layer surface itself is a testSurface
   const Surface* layerSurface = &surfaceRepresentation();
   processSurface(*layerSurface);
+  n_surfaces_total += n_surfaces;
   Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNSurfaces(n_surfaces);
   Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNSurfaceTypes(n_surface_types);
   Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNBoundTypes(n_bound_types);
@@ -445,11 +463,20 @@ Acts::Layer::compatibleSurfaces(
   n_bound_values=0;
   ++Dbg::g_callCounter;
  
-  out << "DEBUG processSurface pos " << position[0] << " " << position[1] << " " << position[2] << " intersections: ";
+  out << "DEBUG processSurface pos " << position[0] << " " << position[1] << " " << position[2] << " intersections [" << n_intersections << "/" << n_surfaces << "]: ";
   for (const auto &elm : sIntersections) {
-     out << ", " << elm.object()->geometryId().value();
+     out << ", " << std::hex << elm.object()->geometryId().value() << std::dec
+         << ( geo_ids.isKnown(elm.object()->geometryId().value()) ? "*" : "")
+         << " [" << elm.pathLength() << "]";
+  }
+  if (!missed_geoids.empty()) {
+     out << " MIS";
+     for (const auto &elm : missed_geoids) {
+        out << ", " << std::hex << elm.first << std::dec << " [" << std::hex << elm.second << std::dec << "]";
+     }
   }
   out << std::endl;
+     
   std::cout << out.str() << std::flush;
 
   return sIntersections;
@@ -540,6 +567,8 @@ Acts::Layer::compatibleSurfaces(
   out << std::endl;
   // lemma 1 : check and fill the surface
   unsigned int n_surfaces{};
+  unsigned int n_surfaces_total{};
+  unsigned int n_intersections{};
   unsigned int n_surface_types{};
   unsigned int n_bound_types{};
   unsigned int n_bound_instances{};
@@ -549,6 +578,8 @@ Acts::Layer::compatibleSurfaces(
   std::array<const void *,16> bound_instances;
   std::array<std::vector<double>,16> bound_values;
   std::size_t a_geo_id{};
+  Dbg::GeoIdHelper  geo_ids;
+  std::vector< std::pair< std::size_t, unsigned int > > missed_geoids;
   
   // [&sIntersections, &options, &parameters
   auto processSurface = [&](const Surface& sf, bool sensitive = false) {
@@ -626,18 +657,23 @@ Acts::Layer::compatibleSurfaces(
     // the surface intersection
     //try {
     unsigned int n_samples_max = sensitive ? trajectory_samples.size() : 1;
+    std::size_t current_interection_size = sIntersections.size();
+    unsigned int flags=0u;
+    
     for (unsigned int sample_i=0; sample_i<n_samples_max; ++sample_i) {
+       ++n_intersections;
     SurfaceIntersection sfi =
        sf.intersect(gctx, trajectory_samples[sample_i].first, trajectory_samples[sample_i].second, boundaryTolerance).closest();
-    out << "DEBUG processSurface pos #" << sample_i << " " << trajectory_samples[sample_i].first[0]
-        << " " << trajectory_samples[sample_i].first[1] << " " << trajectory_samples[sample_i].first[2] << " intersect with "
-        <<  sf.geometryId().value()
-        << " " << ( sf.associatedDetectorElement() != nullptr ? "D" : "")
-        << ( sf.surfaceMaterial() != nullptr ? "M" : "")
-        << ( sfi.isValid() ? " intersecting " : " not-intersecting")
-        << (detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) ? " ok:" : " failed: ")
-        << nearLimit << " < " << sfi.pathLength() << " < " << farLimit
-        << (isUnique(sfi) ? "" : " not unique") << std::endl;
+    // out << "DEBUG processSurface pos #" << sample_i << " " << trajectory_samples[sample_i].first[0]
+    //     << " " << trajectory_samples[sample_i].first[1] << " " << trajectory_samples[sample_i].first[2] << " intersect with "
+    //     <<  std::hex << sf.geometryId().value() << std::dec
+    //     << ( geo_ids.isKnown(sf.geometryId().value()) ? "*" : "")
+    //     << " " << ( sf.associatedDetectorElement() != nullptr ? "D" : "")
+    //     << ( sf.surfaceMaterial() != nullptr ? "M" : "")
+    //     << ( sfi.isValid() ? " intersecting " : " not-intersecting")
+    //     << (detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) ? " ok:" : " failed: ")
+    //     << nearLimit << " < " << sfi.pathLength() << " < " << farLimit
+    //     << (isUnique(sfi) ? "" : " not unique") << std::endl;
     
     if (sfi.isValid() &&
         detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) &&
@@ -645,6 +681,18 @@ Acts::Layer::compatibleSurfaces(
       sIntersections.push_back(sfi);
       break;
     }
+    else {
+       flags |= ((sfi.isValid() == true ) << 0)
+          | ( (detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit)==true) << 1)
+          | ( isUnique(sfi) << 2);
+    }
+    
+    }
+    if (current_interection_size == sIntersections.size()) {
+       if (geo_ids.isKnown(sf.geometryId().value())) {
+          missed_geoids.push_back( std::make_pair(sf.geometryId().value(),
+                                                  flags));
+       }
     }
     // }
     // catch (...) {
@@ -674,6 +722,7 @@ Acts::Layer::compatibleSurfaces(
     for (auto& aSurface : approachSurfaces) {
       processSurface(*aSurface);
     }
+    n_surfaces_total += n_surfaces;
     Dbg::g_InstanceCounter[Dbg::kApproach]->updateNSurfaces(n_surfaces);
     Dbg::g_InstanceCounter[Dbg::kApproach]->updateNSurfaceTypes(n_surface_types);
     Dbg::g_InstanceCounter[Dbg::kApproach]->updateNBoundTypes(n_bound_types);
@@ -703,6 +752,7 @@ Acts::Layer::compatibleSurfaces(
     for (auto& sSurface : sensitiveSurfaces) {
       processSurface(*sSurface, true);
     }
+    n_surfaces_total += n_surfaces;
     Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNSurfaces(n_surfaces);
     Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNSurfaceTypes(n_surface_types);
     Dbg::g_InstanceCounter[Dbg::kSensitive]->updateNBoundTypes(n_bound_types);
@@ -727,6 +777,7 @@ Acts::Layer::compatibleSurfaces(
   // the layer surface itself is a testSurface
   const Surface* layerSurface = &surfaceRepresentation();
   processSurface(*layerSurface);
+  n_surfaces_total += n_surfaces;
   Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNSurfaces(n_surfaces);
   Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNSurfaceTypes(n_surface_types);
   Dbg::g_InstanceCounter[Dbg::kLayerSurfaces]->updateNBoundTypes(n_bound_types);
@@ -742,14 +793,21 @@ Acts::Layer::compatibleSurfaces(
   ++Dbg::g_callCounter;
  
   out << "DEBUG processSurface pos " << trajectory_samples[0].first[0] << " "
-      << trajectory_samples[0].first[1] << " " << trajectory_samples[0].first[2] << " intersections: ";
+      << trajectory_samples[0].first[1] << " " << trajectory_samples[0].first[2] << " intersections[" << n_intersections << "/" << n_surfaces_total << "]: ";
   for (const auto &elm : sIntersections) {
-     out << ", " << elm.object()->geometryId().value()
-        << " " << ( elm.object()->associatedDetectorElement() != nullptr ? "D" : "")
-        << ( elm.object()->surfaceMaterial() != nullptr ? "M" : "")
-        ;
+     out << ", " << std::hex << elm.object()->geometryId().value() << std::dec
+         << ( geo_ids.isKnown(elm.object()->geometryId().value()) ? "*" : "")
+         << " " << ( elm.object()->associatedDetectorElement() != nullptr ? "D" : "")
+         << ( elm.object()->surfaceMaterial() != nullptr ? "M" : "");
+  }
+  if (!missed_geoids.empty()) {
+     out << " MIS";
+     for (const auto &elm : missed_geoids) {
+        out << ", " << std::hex << elm.first << std::dec << " [" << std::hex << elm.second << std::dec << "]";
+     }
   }
   out << std::endl;
+  
   std::cout << out.str() << std::flush;
 
   return sIntersections;

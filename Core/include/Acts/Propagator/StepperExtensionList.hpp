@@ -54,6 +54,8 @@ struct StepperExtensionList : private detail::Extendable<extensions...> {
   // Access to an extension
   using detail::Extendable<extensions...>::get;
 
+  unsigned int n_samples = 0;
+   
   /// @brief Evaluation function to set valid extensions for an upcoming
   /// integration step
   ///

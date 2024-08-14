@@ -12,6 +12,9 @@
 #include "Acts/Propagator/PropagatorError.hpp"
 #include "Acts/Propagator/StandardAborters.hpp"
 #include "Acts/Propagator/detail/LoopProtection.hpp"
+#include "Acts/Propagator/detail/SamplingHelper.hpp"
+
+
 
 #include <type_traits>
 
@@ -171,6 +174,9 @@ auto Acts::Propagator<S, N>::makeState(
       m_stepper.makeState(eOptions.geoContext, eOptions.magFieldContext, start,
                           eOptions.stepping.maxStepSize),
       m_navigator.makeState(eOptions.navigation)};
+  if constexpr(Acts::SamplingHelper::has_extension<decltype(state.stepping)>::value) {
+     state.stepping.extension.n_samples = eOptions.stepping.n_samples;
+  }
 
   static_assert(
       Concepts::has_method<const S, Result<double>, Concepts::Stepper::step_t,
@@ -214,6 +220,9 @@ auto Acts::Propagator<S, N>::makeState(
       m_stepper.makeState(eOptions.geoContext, eOptions.magFieldContext, start,
                           eOptions.stepping.maxStepSize),
       m_navigator.makeState(eOptions.navigation)};
+  if constexpr(Acts::SamplingHelper::has_extension<decltype(state.stepping)>::value) {
+     state.stepping.extension.n_samples = eOptions.stepping.n_samples;
+  }
 
   static_assert(
       Concepts::has_method<const S, Result<double>, Concepts::Stepper::step_t,

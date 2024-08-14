@@ -56,11 +56,24 @@ namespace Acts::SamplingHelper {
    template <typename Object>
    struct has_options<Object, std::void_t<options_type<Object> > > : std::true_type{};
 
+
+
+
+   template <typename Object>
+   using extension_type = decltype(std::declval<Object>().extension);
+
+   template <typename  Object, typename = std::void_t<> >
+   struct has_extension : std::false_type{};
+
+   template <typename Object>
+   struct has_extension<Object, std::void_t<extension_type<Object> > > : std::true_type{};
    
-   template <typename stepper_t
-   unsigned int getNSamplers(const stepper_t &stepper) {
-      if constexpr(has_options<stepper_t>::value) {
-         return stepper.options.n_samples;
+
+   
+   template <typename stepper_state_t>
+   unsigned int getNSamplers(const stepper_state_t &state) {
+      if constexpr(has_extension<stepper_state_t>::value) {
+         return state.extension.n_samples;
       }
       else {
          return 0u;
@@ -173,6 +186,7 @@ namespace Acts::SamplingHelper {
 
    template <unsigned int N_SAMPLES>
    struct NSamples {
+      static constexpr unsigned int getSamples() { return n_samples; }
       static constexpr unsigned int n_samples = N_SAMPLES;
    };
 
