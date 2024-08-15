@@ -80,6 +80,16 @@ namespace Acts::SamplingHelper {
       }
    }
 
+   template <typename stepper_state_t>
+   float getNSigmas(const stepper_state_t &state) {
+      if constexpr(has_extension<stepper_state_t>::value) {
+         return state.extension.n_sigmas;
+      }
+      else {
+         return 1.f;
+      }
+   }
+
    
 
    template <std::size_t N_SAMPLES>
@@ -101,7 +111,8 @@ namespace Acts::SamplingHelper {
    std::array<std::pair<Vector3,Vector3>, N_SAMPLES> makeTrajectorySamples(const Acts::Vector3       &position,
                                                                            const Acts::Vector3       &dir,
                                                                            const BoundSquareMatrix   &curvi_cov,
-                                                                           Acts::Direction           &step_direction)
+                                                                           Acts::Direction           step_direction,
+                                                                           double n_sigmas)
       requires( N_SAMPLES>0)
    {
       std::array<std::pair<Vector3,Vector3>, N_SAMPLES> trajectory_samples;
@@ -114,14 +125,12 @@ namespace Acts::SamplingHelper {
          Vector3 dir_u = Vector3::UnitZ().cross(trajectory_samples[0].second).normalized();
          Vector3 dir_v = trajectory_samples[0].second.cross(dir_u);
 
-         constexpr double multiplier = 4;
-
-         Vector3 delta_u = dir_u * std::sqrt(curvi_cov(eBoundLoc0,eBoundLoc0)) * multiplier;
-         Vector3 delta_v = dir_v * std::sqrt(curvi_cov(eBoundLoc1,eBoundLoc1)) * multiplier;
+         Vector3 delta_u = dir_u * std::sqrt(curvi_cov(eBoundLoc0,eBoundLoc0)) * n_sigmas;
+         Vector3 delta_v = dir_v * std::sqrt(curvi_cov(eBoundLoc1,eBoundLoc1)) * n_sigmas;
 
          Vector3 delta_dirphi;
-         delta_dirphi    << /* -sin(phi) * sin(theta) */ -trajectory_samples[0].second[1] * delta_phi * multiplier,
-            /*  cos(phi) * sin(theta) */  trajectory_samples[0].second[0] * delta_phi * multiplier,
+         delta_dirphi    << /* -sin(phi) * sin(theta) */ -trajectory_samples[0].second[1] * delta_phi * n_sigmas,
+            /*  cos(phi) * sin(theta) */  trajectory_samples[0].second[0] * delta_phi * n_sigmas,
             0;
          // @TODO use jacobi ?
          double phi = std::atan2(trajectory_samples[0].second[1], trajectory_samples[0].second[0]);
@@ -136,9 +145,9 @@ namespace Acts::SamplingHelper {
          double sin_phi_alt = trajectory_samples[0].second[1]*inv_sin_theta;
 
          Vector3 delta_dirtheta;
-         delta_dirtheta <<   /*cos(phi) * cos(theta) */ cos_phi_alt* trajectory_samples[0].second[2] * delta_theta * multiplier,
-            /*sin(phi) * cos(theta) */ sin_phi_alt* trajectory_samples[0].second[2] * delta_theta * multiplier,
-            sin_theta_alt * delta_theta * multiplier;
+         delta_dirtheta <<   /*cos(phi) * cos(theta) */ cos_phi_alt* trajectory_samples[0].second[2] * delta_theta * n_sigmas,
+            /*sin(phi) * cos(theta) */ sin_phi_alt* trajectory_samples[0].second[2] * delta_theta * n_sigmas,
+            sin_theta_alt * delta_theta * n_sigmas;
 
          //    1., 1.    - 1 * dx  1 * dy   45
          //    1.,-1  ->   0 * dx -2 * dy  -45

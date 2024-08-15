@@ -33,7 +33,7 @@ namespace {
   Acts::SurfaceMultiIntersection intersect(const GeometryContext &gctx,
                                            const Surface& surface,
                                            std::uint8_t index,
-                                           std::span<std::pair<Vector3,Vector3> > &trajectory_samples,
+                                           std::span<std::pair<Vector3,Vector3> > trajectory_samples,
                                            const BoundaryTolerance& boundaryTolerance,
                                            ActsScalar surfaceTolerance,
                                            double nearLimit,
@@ -54,7 +54,7 @@ namespace {
                                                      surfaceTolerance);
          msg << "DEBUG updateSingleSurfaceStatus "  << surface.geometryId()
              << " [" << std::hex << surface.geometryId().value() << std::dec << (is_known ? "*" : "") << "] "
-             << " pos: #" << sample_i << " " << trajectory_samples[sample_i].first[0]
+             << " pos: #" << sample_i << "/" << n_max_samples << " " << trajectory_samples[sample_i].first[0]
              << " " << trajectory_samples[sample_i].first[1] << " " << trajectory_samples[sample_i].first[2]
              << (sMultiIntersection.size() > index ? "" : " index-out-of-range")
              << " status : " << (sMultiIntersection.size() > index ? static_cast<int>( sMultiIntersection[index].status()) : -1)
@@ -95,7 +95,7 @@ inline Acts::SurfaceMultiIntersection intersectionHelper (const stepper_t &stepp
    
    //if constexpr(has_stepping<decltype(state)>::value) {
    //          state.gwer();
-   if constexpr(Acts::SamplingHelper::has_cov<decltype(state_stepping)>::value && Acts::SamplingHelper::has_options<stepper_t>::value) {
+   if constexpr(Acts::SamplingHelper::has_cov<decltype(state_stepping)>::value)  {
        if ( Acts::SamplingHelper::getNSamplers(state_stepping)>0) {
 
       return std::visit( [&stepper,
@@ -114,7 +114,8 @@ inline Acts::SurfaceMultiIntersection intersectionHelper (const stepper_t &stepp
                trajectory_samples = Acts::SamplingHelper::makeTrajectorySamples<N_SAMPLES>(stepper.position(state_stepping),
                                                                                            stepper.direction(state_stepping),
                                                                                            state_stepping.cov,
-                                                                                           navDir);
+                                                                                           navDir,
+                                                                                           Acts::SamplingHelper::getNSigmas(state_stepping));
             return intersect(state_stepping.geoContext,
                              surface,
                              index,
@@ -172,7 +173,8 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
   const double nearLimit = std::numeric_limits<double>::lowest();
   const double farLimit = state.stepSize.value(ConstrainedStep::aborter);
 
-  auto sIntersection = intersectionHelper(stepper,
+auto sMultiIntersection  
+   = intersectionHelper(stepper,
                                           state,
                                           surface,
                                           index,
@@ -181,16 +183,31 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
                                           surfaceTolerance,
                                           nearLimit,
                                           farLimit,
-                                          logger)[index];
+                        logger);
+ 
+ if ( index>=sMultiIntersection.size() ) {
+      throw std::runtime_error("No multi intersection with enough elements");
+ }
+ auto sIntersection = sMultiIntersection[index];
+ if (sIntersection.status() == Intersection3D::Status::onSurface
+     && sIntersection.pathLength()>0.001) {
+    throw std::runtime_error("Not on surface.");
+ }
       // surface.intersect(state.geoContext, stepper.position(state),
       //                   navDir * stepper.direction(state), boundaryTolerance,
       //                   surfaceTolerance)[index];
 
   bool is_known = geo_ids.isKnown(surface.geometryId().value());
   if (is_known) {
+
      std::size_t geo_id = surface.geometryId().value();
      (void) geo_id;
      std::cout <<"DEBUG SteppingHelper " << __LINE__ << " geo " << surface.geometryId() << " [" << std::hex << surface.geometryId().value() << std::dec << "*]" << std::endl;
+  }
+
+  unsigned int n_samples =0;
+  if constexpr(Acts::SamplingHelper::has_cov<decltype(state)>::value)  {
+     n_samples = Acts::SamplingHelper::getNSamplers(state);
   }
 
   std::stringstream out;
@@ -201,11 +218,37 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
   // The intersection is on surface already
   if (sIntersection.status() == Intersection3D::Status::onSurface) {
     // Release navigation step size
-    state.stepSize.release(ConstrainedStep::actor);
-    ACTS_VERBOSE("Intersection: state is ON SURFACE");
-    out << " on-surface" << std::endl;
-    std::cout << out.str() << std::flush;
-    return Intersection3D::Status::onSurface;
+
+     Acts::Vector3 position = stepper.position(state);
+     Acts::Vector3 loc3Dframe = (surface.transform(state.geoContext).inverse()) * position;
+     if (std::abs(loc3Dframe.z())< s_onSurfaceTolerance) {
+        state.stepSize.release(ConstrainedStep::actor);
+        ACTS_VERBOSE("Intersection: state is ON SURFACE");
+        out << " on-surface ("  << loc3Dframe.z() << "; index " << static_cast<unsigned int>(index) << "; pathLength  " <<  sIntersection.pathLength() << " )" << std::endl;
+        std::cout << out.str() << std::flush;
+        return Intersection3D::Status::onSurface;
+     }
+     else {
+        if (detail::checkPathLength(loc3Dframe.z(), nearLimit, farLimit,
+                                    logger)) {
+           ACTS_VERBOSE("Surface is reachable");
+           stepper.updateStepSize(state, sIntersection.pathLength(),
+                                  ConstrainedStep::actor);
+           out << " reachabele " << nearLimit << " " << std::abs(loc3Dframe.z()) <<  " < " << farLimit << std::endl;
+           std::cout << out.str() << std::flush;
+           return Intersection3D::Status::reachable;
+        }
+        else {
+           ACTS_VERBOSE("Surface is NOT reachable");
+           out << " not reachable"
+               <<  (sIntersection.isValid()  ? " intersecting" : " not-intersecting" )
+               << nearLimit << " " << sIntersection.pathLength() <<  " < " << farLimit
+               << " (samples " << n_samples << ")" 
+               << std::endl;
+           std::cout << out.str() << std::flush;
+           return Intersection3D::Status::unreachable;
+        }
+     }
   }
 
   if (sIntersection.isValid() &&
@@ -223,6 +266,7 @@ Acts::Intersection3D::Status updateSingleSurfaceStatus(
   out << " not reachable"
       <<  (sIntersection.isValid()  ? " intersecting" : " not-intersecting" )
       << nearLimit << " " << sIntersection.pathLength() <<  " < " << farLimit
+      << " (samples " << n_samples << ")" 
       << std::endl;
   std::cout << out.str() << std::flush;
   return Intersection3D::Status::unreachable;

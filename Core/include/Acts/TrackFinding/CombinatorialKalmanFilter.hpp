@@ -920,10 +920,15 @@ class CombinatorialKalmanFilter {
                                                     << " have been stopped");
 
           if (m_extensions.reporter) {
+             if (!result.activeBranches.empty()) {
+             auto currentBranch = result.activeBranches.back();
+             TrackIndexType prevTip = currentBranch.tipIndex();
+
            m_extensions.reporter(currentBranch,
                                  result.trackStates->getTrackState(prevTip),
                                  Acts::Dbg::AllBranchesStopped,
                                  __LINE__);
+             }
           }
             
           } else {

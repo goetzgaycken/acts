@@ -1082,7 +1082,8 @@ class Navigator {
                trajectory_samples = Acts::SamplingHelper::makeTrajectorySamples<N_SAMPLES>(stepper.position(state.stepping),
                                                                                            stepper.direction(state.stepping),
                                                                                            state.stepping.cov,
-                                                                                           state.options.direction);
+                                                                                           state.options.direction,
+                                                                                           Acts::SamplingHelper::getNSigmas(state.stepping));
          state.navigation.navSurfaces = currentLayer->compatibleSurfaces(state.geoContext,
                                                                          std::span(trajectory_samples.begin(),
                                                                                    trajectory_samples.end()),

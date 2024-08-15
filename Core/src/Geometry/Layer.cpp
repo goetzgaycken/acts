@@ -626,16 +626,16 @@ Acts::Layer::compatibleSurfaces(
        }
        if (!have) {
           bound_values[n_bound_values]=std::move(this_bound_values);
-          if (Dbg::g_counter < 6000) {
-             std::stringstream msg;
-             msg << "DEBUG bound_values call " << Dbg::g_callCounter << " n=" << bound_values[n_bound_values].size() << ":";
-             for (const double &elm : bound_values[n_bound_values]) {
-                msg << std::setw(12) << elm;
-             }
-             msg<<std::endl;
-             std::cout << msg.str() << std::flush;
-             ++Dbg::g_counter;
-          }
+          // if (Dbg::g_counter < 6000) {
+          //    std::stringstream msg;
+          //    msg << "DEBUG bound_values call " << Dbg::g_callCounter << " n=" << bound_values[n_bound_values].size() << ":";
+          //    for (const double &elm : bound_values[n_bound_values]) {
+          //       msg << std::setw(12) << elm;
+          //    }
+          //    msg<<std::endl;
+          //    std::cout << msg.str() << std::flush;
+          //    ++Dbg::g_counter;
+          // }
           ++n_bound_values;
        }
     }
@@ -664,6 +664,30 @@ Acts::Layer::compatibleSurfaces(
        ++n_intersections;
     SurfaceIntersection sfi =
        sf.intersect(gctx, trajectory_samples[sample_i].first, trajectory_samples[sample_i].second, boundaryTolerance).closest();
+    if (sfi.isValid() && sample_i>0) {
+       Acts::Vector3 position = trajectory_samples[0].first;
+       Acts::Vector3 loc3Dframe = (sf.transform(gctx).inverse()) * position;
+       // sfi = Acts::SurfaceMultiIntersection(
+       //    MultiIntersection3D{Intersection3D(sfi.position(),
+       //                                       loc3Dframe.z(),
+       //                                       (std::abs(loc3Dframe.z()) < s_onSurfaceTolerance
+       //                     ? Intersection3D::Status::onSurface
+       //                     : (detail::checkPathLength(loc3Dframe.z(), nearLimit, farLimit) ? Intersection3D::Status::reachable :  Intersection3D::Status::unreachable))),
+       //     Intersection3D::invalid()},
+       //    &sf).closest();
+       sfi = sf.intersect(gctx, trajectory_samples[0].first, trajectory_samples[0].second, BoundaryTolerance::Infinite()).closest();
+       out << "DEBUG processSurface pos #" << sample_i << " " << trajectory_samples[sample_i].first[0]
+           << " " << trajectory_samples[sample_i].first[1] << " " << trajectory_samples[sample_i].first[2] << " intersect with "
+           <<  std::hex << sf.geometryId().value() << std::dec
+           << ( geo_ids.isKnown(sf.geometryId().value()) ? "*" : "")
+           << " " << ( sf.associatedDetectorElement() != nullptr ? "D" : "")
+           << ( sf.surfaceMaterial() != nullptr ? "M" : "")
+           << ( sfi.isValid() ? " intersecting " : " not-intersecting")
+           << (detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) ? " ok:" : " failed: ")
+           << nearLimit << " < " << sfi.pathLength() << " < " << farLimit
+           << (isUnique(sfi) ? "" : " not unique") << "(corrected)" << std::endl;
+       
+    }
     // out << "DEBUG processSurface pos #" << sample_i << " " << trajectory_samples[sample_i].first[0]
     //     << " " << trajectory_samples[sample_i].first[1] << " " << trajectory_samples[sample_i].first[2] << " intersect with "
     //     <<  std::hex << sf.geometryId().value() << std::dec

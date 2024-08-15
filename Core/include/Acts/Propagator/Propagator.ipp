@@ -176,6 +176,7 @@ auto Acts::Propagator<S, N>::makeState(
       m_navigator.makeState(eOptions.navigation)};
   if constexpr(Acts::SamplingHelper::has_extension<decltype(state.stepping)>::value) {
      state.stepping.extension.n_samples = eOptions.stepping.n_samples;
+     state.stepping.extension.n_sigmas = eOptions.stepping.n_sigmas;
   }
 
   static_assert(

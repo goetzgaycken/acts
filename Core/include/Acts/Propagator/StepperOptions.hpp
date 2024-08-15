@@ -37,6 +37,7 @@ struct StepperPlainOptions {
   } dense;
 
    unsigned int n_samples = 0;
+   float n_sigmas = 4;
 };
 
 }  // namespace Acts
