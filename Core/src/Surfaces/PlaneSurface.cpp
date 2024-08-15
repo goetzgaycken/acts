@@ -26,6 +26,8 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#include <sstream>
+#include <iostream>
 
 Acts::PlaneSurface::PlaneSurface(const PlaneSurface& other)
     : GeometryObject(), RegularSurface(other), m_bounds(other.m_bounds) {}
@@ -77,6 +79,12 @@ Acts::Result<Acts::Vector2> Acts::PlaneSurface::globalToLocal(
     double tolerance) const {
   Vector3 loc3Dframe = transform(gctx).inverse() * position;
   if (std::abs(loc3Dframe.z()) > std::abs(tolerance)) {
+     std::stringstream msg;
+     msg << "ERROR local position not on surface: |"
+         << loc3Dframe.z() << "| > " << std::abs(tolerance)
+         << std::endl;
+     std::cout << msg.str() << std::flush;
+     throw std::runtime_error(msg.str());
     return Result<Vector2>::failure(SurfaceError::GlobalPositionNotOnSurface);
   }
   return Result<Vector2>::success({loc3Dframe.x(), loc3Dframe.y()});
