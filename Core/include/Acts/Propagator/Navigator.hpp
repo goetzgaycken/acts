@@ -580,6 +580,9 @@ class Navigator {
         state.stepping, *surface, intersection.index(), state.options.direction,
         BoundaryTolerance::None(), state.options.surfaceTolerance, logger());
     if (surfaceStatus == Intersection3D::Status::onSurface) {
+      std::cout << "DEBUG surfaceStatus " << __LINE__ << " steps "
+                << " on-surface " << std::hex << (surface ? surface->geometryId().value() : 0u) << std::dec
+                << std::endl << std::flush;
       ACTS_VERBOSE(volInfo(state)
                    << "Status Surface successfully hit, storing it.");
       // Set in navigation state, so actors and aborters can access it

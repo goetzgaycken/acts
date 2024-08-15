@@ -46,6 +46,7 @@ auto Acts::Propagator<S, N>::propagate(propagator_state_t& state) const
     for (; state.steps < state.options.maxSteps; ++state.steps) {
       // Pre-Stepping: target setting
       state.stage = PropagatorStage::preStep;
+      std::cout << "DEBUG preStep " << __LINE__ << " steps " << state.steps << " s=" << state.pathLength << std::endl << std::flush;
       m_navigator.preStep(state, m_stepper);
       // Perform a propagation step - it takes the propagation state
       Result<double> res = m_stepper.step(state, m_navigator);
@@ -66,9 +67,11 @@ auto Acts::Propagator<S, N>::propagate(propagator_state_t& state) const
       // Post-stepping:
       // navigator post step call - action list - aborter list
       state.stage = PropagatorStage::postStep;
+      std::cout << "DEBUG postStep " << __LINE__ << " steps " << state.steps << " s=" << state.pathLength << std::endl << std::flush;
       m_navigator.postStep(state, m_stepper);
       state.options.actionList(state, m_stepper, m_navigator, logger());
       if (state.options.abortList(state, m_stepper, m_navigator, logger())) {
+         std::cout << "DEBUG terminatedNormally " << __LINE__ << " steps " << state.steps << " s=" << state.pathLength << std::endl << std::flush;
         terminatedNormally = true;
         break;
       }
