@@ -93,12 +93,18 @@ inline Acts::SurfaceMultiIntersection intersectionHelper (const stepper_t &stepp
                                                    double farLimit,
                                                    const Logger& logger) {
    
+   auto principalIntersection  = surface.intersect(state_stepping.geoContext, stepper.position(state_stepping),
+                                                   navDir * stepper.direction(state_stepping),
+                                                   (surface.associatedDetectorElement() != nullptr
+                                                   ? BoundaryTolerance::Infinite()
+                                                   : boundaryTolerance),
+                                                   surfaceTolerance);
    //if constexpr(has_stepping<decltype(state)>::value) {
    //          state.gwer();
    if constexpr(Acts::SamplingHelper::has_cov<decltype(state_stepping)>::value)  {
        if ( Acts::SamplingHelper::getNSamplers(state_stepping)>0) {
 
-      return std::visit( [&stepper,
+      auto samplingIntersection =  std::visit( [&stepper,
                           &state_stepping,
                           navDir,
                           &surface,
@@ -127,28 +133,47 @@ inline Acts::SurfaceMultiIntersection intersectionHelper (const stepper_t &stepp
                              logger);
 
       }, Acts::SamplingHelper::makeSampleValue(Acts::SamplingHelper::getNSamplers(state_stepping)) );
-      }
-      else {
-         return surface.intersect(state_stepping.geoContext, stepper.position(state_stepping),
-                                  navDir * stepper.direction(state_stepping), boundaryTolerance,
-                                  surfaceTolerance);
+      if (principalIntersection[index].isValid() != samplingIntersection[index].isValid()
+          || detail::checkPathLength(principalIntersection[index].pathLength(), nearLimit, farLimit,
+                                     logger)
+             != detail::checkPathLength(samplingIntersection[index].pathLength(), nearLimit, farLimit,
+                                        logger)
+          || principalIntersection[index].status() != samplingIntersection[index].status()) {
+         Vector3 pos = stepper.position(state_stepping);
+
+         Acts::Vector3 loc3Dframe = (surface.transform(state_stepping.geoContext).inverse()) * pos;
+         Dbg::GeoIdHelper  geo_ids;
+         bool is_known = geo_ids.isKnown(surface.geometryId().value());
+         
+         std::stringstream out;
+         out << "DEBUG updateSingleSurfaceStatus sampling vs principal"  << surface.geometryId()
+             << " [" << std::hex << surface.geometryId().value() << std::dec << (is_known ? "*" : "") << "] "
+             << " " << pos[0]
+             << " " << pos[1] << " " << pos[2]
+             << " (d: " << loc3Dframe.z() << ")"
+             << (samplingIntersection.size() > index ? "" : " index-out-of-range")
+             << (principalIntersection.size() > index ? "" : " index-out-of-range")
+             << " status :"
+             << " " << (samplingIntersection.size() > index ? static_cast<int>( samplingIntersection[index].status()) : -1)
+             << " " << (principalIntersection.size() > index ? static_cast<int>( principalIntersection[index].status()) : -1)
+             << " " << nearLimit << " < "
+             << (samplingIntersection.size() > index ?  samplingIntersection[index].pathLength() : std::numeric_limits<double>::max())
+             << ", " << (principalIntersection.size() > index ?  principalIntersection[index].pathLength() : std::numeric_limits<double>::max())
+             << " < " << farLimit 
+             << std::endl;
+         std::cout << out.str() << std::flush;
       }
    }
-   else {
-      return surface.intersect(state_stepping.geoContext, stepper.position(state_stepping),
-                               navDir * stepper.direction(state_stepping), boundaryTolerance,
-                               surfaceTolerance);
+      // else {
+      //    return surface.intersect(state_stepping.geoContext, stepper.position(state_stepping),
+      //                             navDir * stepper.direction(state_stepping), boundaryTolerance,
+      //                             surfaceTolerance);
+      // }
    }
-   // }
-   // else  {
-   //    return surface.intersect(state.geoContext, stepper.position(state),
-   //                             navDir * stepper.direction(state), boundaryTolerance,
-   //                             surfaceTolerance);
-   // }
-}
+   return principalIntersection;
 
 }
-
+}
 /// Update surface status - Single component
 ///
 /// This method intersect the provided surface and update the navigation
@@ -219,6 +244,7 @@ auto sMultiIntersection
   if (sIntersection.status() == Intersection3D::Status::onSurface) {
     // Release navigation step size
 
+  if  (surface.associatedDetectorElement() != nullptr) {
      Acts::Vector3 position = stepper.position(state);
      Acts::Vector3 loc3Dframe = (surface.transform(state.geoContext).inverse()) * position;
      if (std::abs(loc3Dframe.z())< s_onSurfaceTolerance) {
@@ -234,7 +260,7 @@ auto sMultiIntersection
            ACTS_VERBOSE("Surface is reachable");
            stepper.updateStepSize(state, sIntersection.pathLength(),
                                   ConstrainedStep::actor);
-           out << " reachabele " << nearLimit << " " << std::abs(loc3Dframe.z()) <<  " < " << farLimit << std::endl;
+           out << " reachabele " << nearLimit << " " << loc3Dframe.z() << "; " << sIntersection.pathLength()<<  " < " << farLimit << std::endl;
            std::cout << out.str() << std::flush;
            return Intersection3D::Status::reachable;
         }
@@ -242,7 +268,7 @@ auto sMultiIntersection
            ACTS_VERBOSE("Surface is NOT reachable");
            out << " not reachable"
                <<  (sIntersection.isValid()  ? " intersecting" : " not-intersecting" )
-               << nearLimit << " " << sIntersection.pathLength() <<  " < " << farLimit
+               << nearLimit << " " << loc3Dframe.z() << "; " <<  sIntersection.pathLength() <<  " < " << farLimit
                << " (samples " << n_samples << ")" 
                << std::endl;
            std::cout << out.str() << std::flush;
@@ -250,7 +276,14 @@ auto sMultiIntersection
         }
      }
   }
-
+  else {
+        state.stepSize.release(ConstrainedStep::actor);
+        ACTS_VERBOSE("Intersection: state is ON SURFACE");
+        out << " on-surface (index " << static_cast<unsigned int>(index) << "; pathLength  " <<  sIntersection.pathLength() << " )" << std::endl;
+        std::cout << out.str() << std::flush;
+        return Intersection3D::Status::onSurface;
+  }
+  }
   if (sIntersection.isValid() &&
       detail::checkPathLength(sIntersection.pathLength(), nearLimit, farLimit,
                               logger)) {
