@@ -292,9 +292,8 @@ struct Fixture {
 };
 
 template <typename T_SourceLinkAccessor>
-using TrackStateCreatorType = Acts::ComposableTrackStateCreator< typename  T_SourceLinkAccessor::Iterator,
-                                         Acts::TrackStateCandidatorCreatorImpl<typename T_SourceLinkAccessor::Iterator,TrackContainer>,
-                                         TrackContainer>;
+using TrackStateCreatorType = Acts::TrackStateCandidatorCreatorImpl<typename T_SourceLinkAccessor::Iterator,TrackContainer>;
+   
 template <typename T_SourceLinkAccessor>
 auto makeTrackStateCreator(Fixture::CombinatorialKalmanFilterOptions &options,
                            const T_SourceLinkAccessor &source_link_accessor,
@@ -305,13 +304,11 @@ auto makeTrackStateCreator(Fixture::CombinatorialKalmanFilterOptions &options,
    //  - source link accessor,
    //  - measurement selector
    //  - track  state candidate creator
-   TrackStateCreatorType<T_SourceLinkAccessor> trackStateCreator;
-   trackStateCreator.calibrator = options.extensions.calibrator;
-   trackStateCreator.measurementSelector.template connect<
-      &Acts::MeasurementSelector::select<TrackStateContainerBackend>>(
-        &measSel);
-
-   trackStateCreator.sourceLinkAccessor.template connect<&T_SourceLinkAccessor::range>(&source_link_accessor);
+   TrackStateCreatorType<T_SourceLinkAccessor> trackStateCreator{
+      TrackStateCreatorType<T_SourceLinkAccessor>::sourceLinkAccessorDelegate(source_link_accessor),
+      options.extensions.calibrator,
+      TrackStateCreatorType<T_SourceLinkAccessor>::measurementSelectorDelegate(measSel)
+   };
 
    return trackStateCreator;
 }

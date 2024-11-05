@@ -34,6 +34,80 @@ using BranchVector = boost::container::small_vector<T, s_maxBranchesPerSurface>;
 }  // namespace CkfTypes
 
 
+
+/// @brief Get source link range for the given surface and pass to derived class for
+///      the actual creation of track states.
+///
+/// - First get a source link range covering relevant measurements for the given surface
+///   This task is delegated to a SourceLinkAccessor.
+/// - Then, pass the source link range to the derived class which will do everything else.
+template <typename track_state_creator_derived_t,
+          typename source_link_iterator_t,
+          typename track_container_t>
+struct ComposableTrackStateCreator  {
+  using SourceLinkAccessor = SourceLinkAccessorDelegate<source_link_iterator_t>;
+  using TrackStatesResult =
+     Acts::Result<CkfTypes::BranchVector<TrackIndexType>>;
+  using TrackStateContainerBackend =
+      typename track_container_t::TrackStateContainerBackend;
+  using TrackProxy = typename track_container_t::TrackProxy;
+  using TrackStateProxy = typename track_container_t::TrackStateProxy;
+  using BoundState = std::tuple<BoundTrackParameters, BoundMatrix, double>;
+
+  SourceLinkAccessor sourceLinkAccessor;
+   
+  template <typename T_SourceLinkAccessor>
+  static SourceLinkAccessor sourceLinkAccessorDelegate(const T_SourceLinkAccessor &sourceLinkAccessor) {
+     SourceLinkAccessor delegate;
+     delegate.template connect<&T_SourceLinkAccessor::range>(&sourceLinkAccessor);
+     return delegate;
+  }
+
+  const track_state_creator_derived_t &derived() const
+   { return *static_cast<const track_state_creator_derived_t *>(this); }
+
+  /// @brief extend the trajectory onto the given surface.
+  ///
+  /// @param gctx The geometry context to be used for this task
+  /// @param calibrationContext The calibration context used to fill the calibrated data
+  /// @param surface The surface onto which the trajectory is extended
+  /// @param boundState the predicted bound state on the given surface
+  /// @param prevTip the tip of the trajectory which is to be extended
+  /// @param bufferTrajectory a temporary buffer which can be used to create
+  ///        temporary track states before the selection.
+  /// @param trackStateCandidates a temporary buffer which can be used to
+  ///        to keep track of newly created temporary track states.
+  /// @param trajectory the trajectory to be extended.
+  /// @param logger a logger for messages.
+  /// 
+  /// @return a list of indices of newly created track states which extend the
+  ///    trajectory onto the given surface and match the bound state, or an error.
+  ///
+  /// Extend or branch onto the given surface. This may create new track states
+  /// using measurements which match the predicted bound state. This may create
+  /// multiple branches. The new track states still miss the "filtered" data.
+  Result<CkfTypes::BranchVector<TrackIndexType>> extendTrajectoryOntoSurface (
+      const GeometryContext& gctx,
+      const CalibrationContext& calibrationContext,
+      [[maybe_unused]] const Surface& surface, const BoundState& boundState,
+      TrackIndexType prevTip, TrackStateContainerBackend& bufferTrajectory,
+      std::vector<TrackStateProxy>& trackStateCandidates,
+      TrackStateContainerBackend& trajectory, const Logger& logger) const {
+
+    TrackStatesResult tsRes = TrackStatesResult::success({});
+    using SourceLinkRange = decltype(sourceLinkAccessor(surface));
+    std::optional<SourceLinkRange>
+       slRange = sourceLinkAccessor(surface);
+    if (slRange.has_value() && slRange->first != slRange->second) {
+       auto [slBegin, slEnd] = *slRange;
+       tsRes = derived().createSourceLinkTrackStates(
+          gctx, calibrationContext, surface, boundState, slBegin, slEnd,
+          prevTip, bufferTrajectory, trackStateCandidates, trajectory, logger);
+    }
+    return tsRes;
+  }
+};
+
 /// @brief Create track states for selected measurements from a source link range.
 ///
 /// - First create temporary track states for all measurements defined
@@ -44,9 +118,11 @@ using BranchVector = boost::container::small_vector<T, s_maxBranchesPerSurface>;
 ///   track states. The track states of these branches still lack the filtered
 //    data which is to be filled by the next stage e.g. the CombinatorialKalmanFilter.
 template <typename source_link_iterator_t, typename track_container_t>
-struct TrackStateCandidatorCreatorImpl {
-  typename CombinatorialKalmanFilterExtensions<track_container_t>::Calibrator
-      calibrator;
+struct TrackStateCandidatorCreatorImpl
+   : ComposableTrackStateCreator<TrackStateCandidatorCreatorImpl<source_link_iterator_t, track_container_t>,
+                                 source_link_iterator_t,
+                                 track_container_t>
+{
 
   using candidate_container_t =
       typename std::vector<typename track_container_t::TrackStateProxy>;
@@ -55,14 +131,37 @@ struct TrackStateCandidatorCreatorImpl {
                                 typename candidate_container_t::iterator>>(
           candidate_container_t& trackStates, bool&, const Logger&)>;
 
-  MeasurementSelector measurementSelector{
-      DelegateFuncTag<voidMeasurementSelector>{}};
   using TrackStateContainerBackend =
       typename track_container_t::TrackStateContainerBackend;
   using TrackProxy = typename track_container_t::TrackProxy;
   using TrackStateProxy = typename track_container_t::TrackStateProxy;
   using BoundState = std::tuple<BoundTrackParameters, BoundMatrix, double>;
 
+
+  typename CombinatorialKalmanFilterExtensions<track_container_t>::Calibrator
+      calibrator;
+  MeasurementSelector measurementSelector{
+      DelegateFuncTag<voidMeasurementSelector>{}};
+   
+  template < typename measurement_selector_t>
+  static MeasurementSelector
+  measurementSelectorDelegate(const measurement_selector_t &measurementSelector)
+   {
+      MeasurementSelector delegate;
+      delegate.template connect<&measurement_selector_t::template select<TrackStateContainerBackend>>(&measurementSelector);
+      return delegate;
+   }
+   
+  template < typename calibrator_t>
+  static typename CombinatorialKalmanFilterExtensions<track_container_t>::Calibrator
+  calibratorDelegate(const calibrator_t &calibrator)
+   {
+      typename CombinatorialKalmanFilterExtensions<track_container_t>::Calibrator
+         delegate;
+      delegate.template connect<&calibrator_t::calibrate>(&calibrator);
+      return delegate;
+   }
+   
   /// Create track states for selected measurements given by the source links
   ///
   /// @param gctx The current geometry context
@@ -243,13 +342,17 @@ struct TrackStateCandidatorCreatorImpl {
    
 };
 
-/// @brief Base class for the ComposableTrackStateCreator which simple delegates its tasks
+/// @brief Base class for the ComposableTrackStateCreator which simply delegates its tasks
 ///
 /// A base class for the ComposableTrackStateCreator which simply delegates
 /// the track state creation and measurement selection to a dedicated
 /// implementation.
 template <typename source_link_iterator_t, typename track_container_t>
-struct TrackStateCreatorDelegate {
+struct TrackStateCreatorDelegate
+   : ComposableTrackStateCreator<TrackStateCreatorDelegate<source_link_iterator_t, track_container_t>,
+                                 source_link_iterator_t,
+                                 track_container_t>
+{
   using TrackStateContainerBackend =
       typename track_container_t::TrackStateContainerBackend;
   using TrackProxy = typename track_container_t::TrackProxy;
@@ -286,6 +389,15 @@ struct TrackStateCreatorDelegate {
 
   TrackStateCandidateCreator trackStateCreator;
 
+  template <typename track_state_candidate_creator_t>
+  static TrackStateCandidateCreator
+  makeTrackStateCandidateCreator(const track_state_candidate_creator_t &track_state_candidate_creator) {
+     TrackStateCandidateCreator delegate;
+     delegate.template connect<&track_state_candidate_creator_t
+                  ::template createSourceLinkTrackStates<source_link_iterator_t> >(&track_state_candidate_creator);
+     return delegate;
+  }
+
   Result<CkfTypes::BranchVector<TrackIndexType>> createSourceLinkTrackStates(
       const GeometryContext& gctx,
       const CalibrationContext& calibrationContext,
@@ -301,67 +413,4 @@ struct TrackStateCreatorDelegate {
 
 };
 
-/// @brief Extend a track state creator to start from a bound state and a surface.
-///
-/// This adds a source link accessor to the base class which will create a source link
-/// range for measurements associated to the given surface. The source link range
-/// is then passed to the base class which will create track states and select those
-/// which match the bound state.
-///
-/// - First get a source link range covering relevant measurements for the given surface
-///   This task is delegated to a SourceLinkAccessor.
-/// - Then, pass the source link range to the base class which will do everything else.
-template <typename source_link_iterator_t, class T_TrackStateCreatorBase, typename track_container_t>
-struct ComposableTrackStateCreator : public T_TrackStateCreatorBase {
-  using SourceLinkAccessor = SourceLinkAccessorDelegate<source_link_iterator_t>;
-  SourceLinkAccessor sourceLinkAccessor;
-  using TrackStatesResult =
-     Acts::Result<CkfTypes::BranchVector<TrackIndexType>>;
-  using TrackStateContainerBackend =
-      typename track_container_t::TrackStateContainerBackend;
-  using TrackProxy = typename track_container_t::TrackProxy;
-  using TrackStateProxy = typename track_container_t::TrackStateProxy;
-  using BoundState = std::tuple<BoundTrackParameters, BoundMatrix, double>;
-
-  /// @brief extend the trajectory onto the given surface.
-  ///
-  /// @param gctx The geometry context to be used for this task
-  /// @param calibrationContext The calibration context used to fill the calibrated data
-  /// @param surface The surface onto which the trajectory is extended
-  /// @param boundState the predicted bound state on the given surface
-  /// @param prevTip the tip of the trajectory which is to be extended
-  /// @param bufferTrajectory a temporary buffer which can be used to create
-  ///        temporary track states before the selection.
-  /// @param trackStateCandidates a temporary buffer which can be used to
-  ///        to keep track of newly created temporary track states.
-  /// @param trajectory the trajectory to be extended.
-  /// @param logger a logger for messages.
-  /// 
-  /// @return a list of indices of newly created track states which extend the
-  ///    trajectory onto the given surface and match the bound state, or an error.
-  ///
-  /// Extend or branch onto the given surface. This may create new track states
-  /// using measurements which match the predicted bound state. This may create
-  /// multiple branches. The new track states still miss the "filtered" data.
-  Result<CkfTypes::BranchVector<TrackIndexType>> extendTrajectoryOntoSurface (
-      const GeometryContext& gctx,
-      const CalibrationContext& calibrationContext,
-      [[maybe_unused]] const Surface& surface, const BoundState& boundState,
-      TrackIndexType prevTip, TrackStateContainerBackend& bufferTrajectory,
-      std::vector<TrackStateProxy>& trackStateCandidates,
-      TrackStateContainerBackend& trajectory, const Logger& logger) const {
-
-    TrackStatesResult tsRes = TrackStatesResult::success({});
-    using SourceLinkRange = decltype(sourceLinkAccessor(surface));
-    std::optional<SourceLinkRange>
-       slRange = sourceLinkAccessor(surface);
-    if (slRange.has_value() && slRange->first != slRange->second) {
-       auto [slBegin, slEnd] = *slRange;
-       tsRes = this->createSourceLinkTrackStates(
-          gctx, calibrationContext, surface, boundState, slBegin, slEnd,
-          prevTip, bufferTrajectory, trackStateCandidates, trajectory, logger);
-    }
-    return tsRes;
-  }
-};
 }
