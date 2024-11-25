@@ -8,4 +8,5 @@ target_sources(
         BinningType.cpp
         Intersection.cpp
         GraphViz.cpp
+        DumpToAscii.cpp
 )

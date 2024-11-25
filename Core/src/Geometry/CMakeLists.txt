@@ -43,4 +43,5 @@ target_sources(
         PortalLinkBase.cpp
         PortalError.cpp
         PortalShell.cpp
+        GeoIdRegistry.cpp
 )
