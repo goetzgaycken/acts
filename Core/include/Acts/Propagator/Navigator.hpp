@@ -35,7 +35,7 @@ namespace Acts {
 template <typename object_t>
 struct NavigationOptions {
   /// The boundary check directive
-  BoundaryTolerance boundaryTolerance = BoundaryTolerance::None();
+   BoundaryTolerance boundaryTolerance = BoundaryTolerance::AbsoluteCartesian{2*UnitConstants::mm,2*UnitConstants::mm};
 
   // How to resolve the geometry
   /// Always look for sensitive
@@ -720,7 +720,10 @@ class Navigator {
           state.stepping, *surface, intersection.index(),
           state.options.direction, boundaryTolerance,
           state.options.surfaceTolerance, logger());
-      if (surfaceStatus == Intersection3D::Status::reachable) {
+      assert(static_cast<unsigned int>(surfaceStatus) < static_cast<unsigned int>(Intersection3D::Status::reachable)
+             || surfaceStatus == Intersection3D::Status::reachable
+             || surfaceStatus == Intersection3D::Status::onSurface);
+      if (static_cast<unsigned int>(surfaceStatus) >= static_cast<unsigned int>(Intersection3D::Status::reachable)) {
         ACTS_VERBOSE(volInfo(state)
                      << "Surface reachable, step size updated to "
                      << stepper.outputStepSize(state.stepping));
