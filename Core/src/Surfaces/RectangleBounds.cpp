@@ -13,16 +13,33 @@
 #include <iomanip>
 #include <iostream>
 
+std::atomic<unsigned int> g_rectangleBorderCount{};
+std::atomic<unsigned int> g_invRectangleBorderCount{};
+
 bool Acts::RectangleBounds::inside(
     const Acts::Vector2& lposition,
     const Acts::BoundaryTolerance& boundaryTolerance) const {
   if (boundaryTolerance.hasAbsoluteCartesian()) {
      
      const BoundaryTolerance::AbsoluteCartesian& tolerance = boundaryTolerance.asAbsoluteCartesian();
-     return    lposition(0,0) > (m_min.x()-tolerance.tolerance0)
+     bool ret=    lposition(0,0) > (m_min.x()-tolerance.tolerance0)
             && lposition(0,0) < (m_max.x()+tolerance.tolerance0)
             && lposition(1,0) > (m_min.y()-tolerance.tolerance1)
             && lposition(1,0) < (m_max.y()+tolerance.tolerance1);
+     bool ret2= (   lposition(0,0) > (m_min.x())
+                    && lposition(0,0) < (m_max.x())
+                    && lposition(1,0) > (m_min.y())
+                    && lposition(1,0) < (m_max.y()) );
+     if (ret != ret2) {
+        if (ret) {
+           ++g_rectangleBorderCount;
+        }
+        if (ret2) {
+           ++g_invRectangleBorderCount;
+        }
+        
+     }
+     return ret ;
   }
    
   return detail::insideAlignedBox(m_min, m_max, boundaryTolerance, lposition,

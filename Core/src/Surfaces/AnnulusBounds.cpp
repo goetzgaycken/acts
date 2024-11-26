@@ -21,6 +21,10 @@
 #include <limits>
 #include <stdexcept>
 
+
+std::atomic<unsigned int> g_annulusBorderCount{};
+std::atomic<unsigned int> g_invAnnulusBorderCount{};
+
 Acts::AnnulusBounds::AnnulusBounds(
     const std::array<double, eSize>& values) noexcept(false)
     : m_values(values), m_moduleOrigin({values[eOriginX], values[eOriginY]}) {
@@ -167,6 +171,7 @@ bool Acts::AnnulusBounds::inside(const Vector2& lposition, double tolR,
     if (r_mod < (get(eMinR) - tolR) || r_mod > (get(eMaxR) + tolR)) {
       return false;
     }
+
   }
   return true;
 }
@@ -180,12 +185,18 @@ bool Acts::AnnulusBounds::inside(const Vector2& lposition, double tolR,
   double phiLoc = locpo_rotated[eBoundLoc1];
   double phiLocR = phiLoc*scale;
   double rLoc = locpo_rotated[eBoundLoc0];
+  bool ret = true;
+  bool ret2 = true;
 
   if (phiLocR < (get(eMinPhiRel)*scale - tolPhiR) ||
       phiLocR > (get(eMaxPhiRel)*scale + tolPhiR)) {
-    return false;
+    ret = false;
   }
-
+  if (phiLocR < (get(eMinPhiRel)*scale) ||
+      phiLocR > (get(eMaxPhiRel)*scale)) {
+    ret2 = false;
+  }
+ 
   // calculate R in MODULE SYSTEM to evaluate R-bounds
   if (tolR == 0.) {
     // don't need R, can use R^2
@@ -194,7 +205,7 @@ bool Acts::AnnulusBounds::inside(const Vector2& lposition, double tolR,
         2 * m_shiftPC[eBoundLoc0] * rLoc * cos(phiLoc - m_shiftPC[eBoundLoc1]);
 
     if (r_mod2 < get(eMinR) * get(eMinR) || r_mod2 > get(eMaxR) * get(eMaxR)) {
-      return false;
+       ret =false;;
     }
   } else {
     // use R
@@ -203,10 +214,23 @@ bool Acts::AnnulusBounds::inside(const Vector2& lposition, double tolR,
         2 * m_shiftPC[eBoundLoc0] * rLoc * cos(phiLoc - m_shiftPC[eBoundLoc1]));
 
     if (r_mod < (get(eMinR) - tolR) || r_mod > (get(eMaxR) + tolR)) {
-      return false;
+      ret=false;
+    }
+    if (r_mod < (get(eMinR)) || r_mod > (get(eMaxR))) {
+       ret2=false;
+    }
+    if (ret != ret2) {
+       auto min_phi = get(eMinPhiRel);
+       auto max_phi = get(eMaxPhiRel);
+       if (ret) {
+          ++g_annulusBorderCount;
+       }
+       if (ret2) {
+          ++g_invAnnulusBorderCount;
+       }
     }
   }
-  return true;
+  return ret;
 }
 
 bool Acts::AnnulusBounds::inside(
