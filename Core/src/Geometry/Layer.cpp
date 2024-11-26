@@ -157,7 +157,7 @@ Acts::Layer::compatibleSurfaces(
     if (!acceptSurface(sf, sensitive)) {
       return;
     }
-    BoundaryTolerance boundaryTolerance = options.boundaryTolerance;
+    BoundaryTolerance boundaryTolerance = sensitive ? options.boundaryTolerance : BoundaryTolerance::None();
     if (rangeContainsValue(options.externalSurfaces, sf.geometryId())) {
       boundaryTolerance = BoundaryTolerance::Infinite();
     }
@@ -167,6 +167,7 @@ Acts::Layer::compatibleSurfaces(
     if (sfi.isValid() &&
         detail::checkPathLength(sfi.pathLength(), nearLimit, farLimit) &&
         isUnique(sfi)) {
+       
       sIntersections.push_back(sfi);
     }
   };
@@ -248,7 +249,7 @@ Acts::SurfaceIntersection Acts::Layer::surfaceOnApproach(
   // Approach descriptor present and resolving is necessary
   if (m_approachDescriptor && (resolvePS || resolveMS)) {
     SurfaceIntersection aSurface = m_approachDescriptor->approachSurface(
-        gctx, position, direction, options.boundaryTolerance, nearLimit,
+        gctx, position, direction, BoundaryTolerance::None(), nearLimit,
         farLimit);
     return aSurface;
   }
@@ -256,6 +257,6 @@ Acts::SurfaceIntersection Acts::Layer::surfaceOnApproach(
   // Intersect and check the representing surface
   const Surface& rSurface = surfaceRepresentation();
   auto sIntersection =
-      rSurface.intersect(gctx, position, direction, options.boundaryTolerance);
+      rSurface.intersect(gctx, position, direction, BoundaryTolerance::None());
   return findValidIntersection(sIntersection);
 }
