@@ -21,9 +21,7 @@
 #include <limits>
 #include <stdexcept>
 
-
-std::atomic<unsigned int> g_annulusBorderCount{};
-std::atomic<unsigned int> g_invAnnulusBorderCount{};
+#include "Acts/Utilities/Counter.hpp"
 
 Acts::AnnulusBounds::AnnulusBounds(
     const std::array<double, eSize>& values) noexcept(false)
@@ -179,6 +177,7 @@ bool Acts::AnnulusBounds::inside(const Vector2& lposition, double tolR,
 bool Acts::AnnulusBounds::inside(const Vector2& lposition, double tolR,
                                  double tolPhiR,
                                  double scale) const {
+   DEBUG_INCREMENT_COUNTER("AnnulusBound",__FILE__,__LINE__);
   // locpo is PC in STRIP SYSTEM
   // need to perform internal rotation induced by average phi
   Vector2 locpo_rotated = m_rotationStripPC * lposition;
@@ -220,13 +219,54 @@ bool Acts::AnnulusBounds::inside(const Vector2& lposition, double tolR,
        ret2=false;
     }
     if (ret != ret2) {
+       auto min_r = get(eMinR);
+       auto max_r = get(eMaxR);
        auto min_phi = get(eMinPhiRel);
        auto max_phi = get(eMaxPhiRel);
+       bool ret_alt=true;
+       if (phiLocR < (get(eMinPhiRel)*r_mod - tolPhiR) ||
+           phiLocR > (get(eMaxPhiRel)*r_mod + tolPhiR)) {
+          ret_alt = false;
+       }
+       if (ret != ret_alt ) {
+          DEBUG_INCREMENT_COUNTER("AnnulusBound_unpreciseTolerance",__FILE__,__LINE__);
+       }
+       
        if (ret) {
-          ++g_annulusBorderCount;
+          if (r_mod < min_r  - tolR /*&& lposition(0,0) > m_min.x()-tolerance.tolerance0*/) {
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_posMinR",__FILE__,__LINE__, r_mod - min_r , 20,-5.,0.);
+          }
+          if (r_mod > max_r  + tolR /*&& lposition(0,0) > m_min.x()-tolerance.tolerance0*/) {
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_posMaxR",__FILE__,__LINE__, r_mod - max_r , 20,0.,5.);
+          }
+          if (phiLocR < min_phi*scale ) {
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_posMinPhiR",__FILE__,__LINE__,  phiLocR - min_phi*scale , 20,-5.,0.);
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_posMinPhiRAlt",__FILE__,__LINE__, phiLocR - min_phi*r_mod , 20,-5.,0.);
+          }
+          if (phiLocR > max_phi*scale ) {
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_posMaxPhiR",__FILE__,__LINE__,  phiLocR - max_phi*scale , 20,0.,5.);
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_posMaxPhiRAlt",__FILE__,__LINE__, phiLocR - max_phi*r_mod , 20,0.,5.);
+          }
+          DEBUG_INCREMENT_COUNTER("AnnulusBound_posTol",__FILE__,__LINE__);
+          //          ++g_annulusBorderCount;
        }
        if (ret2) {
-          ++g_invAnnulusBorderCount;
+          if (r_mod < min_r /*&& lposition(0,0) > m_min.x()-tolerance.tolerance0*/) {
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_negMinR",__FILE__,__LINE__, r_mod - min_r , 20,-5.,0.);
+          }
+          if (r_mod > max_r /*&& lposition(0,0) > m_min.x()-tolerance.tolerance0*/) {
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_negMaxR",__FILE__,__LINE__, r_mod - max_r , 20,0.,5.);
+          }
+          if (phiLocR < min_phi*scale - tolPhiR ) {
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_negMinPhiR",__FILE__,__LINE__,  phiLocR - min_phi*scale , 20,-5.,0.);
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_pnegMinPhiRAlt",__FILE__,__LINE__, phiLocR - min_phi*r_mod , 20,-5.,0.);
+          }
+          if (phiLocR > max_phi*scale + tolPhiR ) {
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_negMaxPhiR",__FILE__,__LINE__,  phiLocR - max_phi*scale , 20,0.,5.);
+             DEBUG_HISTOGRAM_COUNTER("AnnulusBound_negMaxPhiRAlt",__FILE__,__LINE__, phiLocR - max_phi*r_mod , 20,0.,5.);
+          }
+          DEBUG_INCREMENT_COUNTER("AnnulusBound_negTol",__FILE__,__LINE__);
+             //          ++g_invAnnulusBorderCount;
        }
     }
   }

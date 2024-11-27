@@ -13,14 +13,14 @@
 #include <iomanip>
 #include <iostream>
 
-std::atomic<unsigned int> g_rectangleBorderCount{};
-std::atomic<unsigned int> g_invRectangleBorderCount{};
+#include "Acts/Utilities/Counter.hpp"
 
 bool Acts::RectangleBounds::inside(
     const Acts::Vector2& lposition,
     const Acts::BoundaryTolerance& boundaryTolerance) const {
   if (boundaryTolerance.hasAbsoluteCartesian()) {
      
+     DEBUG_INCREMENT_COUNTER("RectangularBound",__FILE__,__LINE__);
      const BoundaryTolerance::AbsoluteCartesian& tolerance = boundaryTolerance.asAbsoluteCartesian();
      bool ret=    lposition(0,0) > (m_min.x()-tolerance.tolerance0)
             && lposition(0,0) < (m_max.x()+tolerance.tolerance0)
@@ -32,10 +32,36 @@ bool Acts::RectangleBounds::inside(
                     && lposition(1,0) < (m_max.y()) );
      if (ret != ret2) {
         if (ret) {
-           ++g_rectangleBorderCount;
+           if (lposition(0,0) < m_min.x() /*&& lposition(0,0) > m_min.x()-tolerance.tolerance0*/) {
+              DEBUG_HISTOGRAM_COUNTER("RectangularBound_posMinX",__FILE__,__LINE__, lposition(0,0) - m_min.x() , 20,-5.,0.);
+           }
+           if (lposition(0,0) > m_max.x() /*&& lposition(0,0) < m_min.x()-tolerance.tolerance0*/) {
+              DEBUG_HISTOGRAM_COUNTER("RectangularBound_posMaxX",__FILE__,__LINE__, lposition(0,0) - m_max.x() , 20,0.,5.);
+           }
+           if (lposition(1,0) < m_min.y() /*&& lposition(0,0) > m_min.x()-tolerance.tolerance0*/) {
+              DEBUG_HISTOGRAM_COUNTER("RectangularBound_posMinY",__FILE__,__LINE__, lposition(1,0) - m_min.y() , 20,-5.,0.);
+           }
+           if (lposition(1,0) > m_max.y() /*&& lposition(0,0) < m_min.x()-tolerance.tolerance0*/) {
+              DEBUG_HISTOGRAM_COUNTER("RectangularBound_posMaxY",__FILE__,__LINE__, lposition(1,0) - m_max.y() , 20,0.,5.);
+           }
+           DEBUG_INCREMENT_COUNTER("RectangularBound_posTol",__FILE__,__LINE__);
+           //           ++g_rectangleBorderCount;
         }
         if (ret2) {
-           ++g_invRectangleBorderCount;
+           if (lposition(0,0) < m_min.x()-tolerance.tolerance0 /*&& lposition(0,0) > m_min.x()-tolerance.tolerance0*/) {
+              DEBUG_HISTOGRAM_COUNTER("RectangularBound_negMinX",__FILE__,__LINE__, lposition(0,0) - m_min.x(), 20,0.,5.);
+           }
+           if (lposition(0,0) > m_max.x()+tolerance.tolerance0 /*&& lposition(0,0) < m_min.x()-tolerance.tolerance0*/) {
+              DEBUG_HISTOGRAM_COUNTER("RectangularBound_negMaxX",__FILE__,__LINE__, lposition(0,0) - m_max.x() , 20,-5.,0.);
+           }
+           if (lposition(1,0) < m_min.y()-tolerance.tolerance1 /*&& lposition(0,0) > m_min.x()-tolerance.tolerance0*/) {
+              DEBUG_HISTOGRAM_COUNTER("RectangularBound_negMinY",__FILE__,__LINE__, lposition(1,0) - m_min.y() , 20,0,5.);
+           }
+           if (lposition(1,0) > m_max.y()+tolerance.tolerance1 /*&& lposition(0,0) < m_min.x()-tolerance.tolerance0*/) {
+              DEBUG_HISTOGRAM_COUNTER("RectangularBound_negMaxY",__FILE__,__LINE__, lposition(1,0) - m_max.y() , 20,5.,0.);
+           }
+           DEBUG_INCREMENT_COUNTER("RectangularBound_negTol",__FILE__,__LINE__);
+           //++g_invRectangleBorderCount;
         }
         
      }

@@ -22,6 +22,8 @@
 #include <iterator>
 #include <vector>
 
+#include "Acts/Utilities/Counter.hpp"
+
 Acts::Layer::Layer(std::unique_ptr<SurfaceArray> surfaceArray, double thickness,
                    std::unique_ptr<ApproachDescriptor> ades, LayerType laytyp)
     : m_nextLayers(NextLayers(nullptr, nullptr)),
@@ -211,6 +213,7 @@ Acts::Layer::compatibleSurfaces(
   // the layer surface itself is a testSurface
   const Surface* layerSurface = &surfaceRepresentation();
   processSurface(*layerSurface);
+  DEBUG_HISTOGRAM_COUNTER("sIntersections",__FILE__,__LINE__, sIntersections.size() , 20,-.5,19.5);
 
   return sIntersections;
 }
